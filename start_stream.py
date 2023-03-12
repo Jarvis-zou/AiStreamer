@@ -3,7 +3,6 @@ import os
 from utils import AiStreamer
 
 openai_key = os.environ.get('OPENAI_API_KEY')
-openai_key = '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'
 
 # set configuration
 parser = argparse.ArgumentParser()
