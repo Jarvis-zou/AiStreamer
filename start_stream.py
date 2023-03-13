@@ -1,6 +1,6 @@
 import argparse
 import os
-from utils import AiStreamer
+from src.streamer import AiStreamer
 
 openai_key = os.environ.get('OPENAI_API_KEY')
 
