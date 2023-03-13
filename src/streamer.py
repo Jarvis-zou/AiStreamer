@@ -2,9 +2,11 @@ import openai
 import os
 import jsonlines
 import numpy as np
-from TTS.models.synthesizer.inference import Synthesizer
-from TTS.models.encoder import inference as encoder
-from TTS.models.vocoder.hifigan import inference as gan_vocoder
+import soundfile as sf
+from pathlib import Path
+from src.TTS.models.synthesizer.inference import Synthesizer
+from src.TTS.models.encoder import inference as encoder
+from src.TTS.models.vocoder.hifigan import inference as gan_vocoder
 
 
 class AiStreamer:
@@ -19,7 +21,7 @@ class AiStreamer:
             contents: [list]
         """
         jsonl_name = self.args.streamer + '.jsonl'
-        jsonl_path = os.path.join(self.args.text_dir, jsonl_name)  # jsonl文件的相对路径
+        jsonl_path = os.path.join(self.args.text_input, jsonl_name)  # jsonl文件的相对路径
         with open(jsonl_path, 'r+', encoding='utf8') as f:
             contents = []
             for items in jsonlines.Reader(f):
@@ -31,7 +33,7 @@ class AiStreamer:
         contents = self.read_jsonl()
         contents[-1]["content"] = question  # 写入新问题
         jsonl_name = self.args.streamer + '.jsonl'
-        jsonl_path = os.path.join(self.args.text_dir, jsonl_name)  # jsonl文件的相对路径
+        jsonl_path = os.path.join(self.args.text_inputs, jsonl_name)  # jsonl文件的相对路径
         with open(jsonl_path, 'w+', encoding='utf8') as f:
             for content in contents:
                 f.write(str(content).replace('\'', '\"') + '\n')
@@ -42,7 +44,7 @@ class AiStreamer:
 
     def transcribe_audio(self):
         """对指定音频进行语音识别"""
-        audio_file_path = os.path.join(os.path.join(self.args.audio_dir, self.args.streamer), 'audio_input.m4a')
+        audio_file_path = os.path.join(os.path.join(self.args.audio_input, self.args.streamer), 'audio_input.m4a')
         audio_file = open(audio_file_path, 'rb')
         transcript = openai.Audio.transcribe("whisper-1", audio_file)
         sentences = transcript['text'].split(',')
@@ -78,11 +80,42 @@ class AiStreamer:
             )
             return result['choices'][0]['message']['content']
 
-    def generate_audio(self, target_wav, save_path):
-        """基于input_voice的声纹对input_text进行模拟，输出为使用克隆声音朗读input_text的音频wav"""
-        encoder_wav = synthesizer.load_preprocess_wav(input_voice_path)  # preprocess wav file
-        embed, partial_embeds, _ = encoder.embed_utterance(encoder_wav,
-                                                           return_partials=True)  # generate voice embed
+    @ staticmethod
+    def find_model(model_dir):
+        """寻找model_dir下后缀在check_list的文件的文件"""
+        path = ""
+        check_list = ['pt', 'pth']
+        for file in os.listdir(model_dir):
+            suffix = file.split('.')[-1]
+            if suffix in check_list:
+                path = model_dir / file
+                print(path)
+        return path
+
+    def generate_audio(self, input_text):
+        """
+        根据speaker音色和文本生成语音输出
+
+        :param input_text: 待合成的文本
+        :return:
+            generate_wav: 根据文本和speaker音色合成的语音
+            synthesizer.sample_rate: 采样频率
+        """
+        # load models
+        encoder_path = self.find_model(Path(self.args.tts_models) / 'encoder')
+        synthesizer_path = self.find_model(Path(self.args.tts_models) / 'synthesizer')
+        vocoder_path = self.find_model(Path(self.args.tts_models) / 'vocoder')
+        try:
+            encoder.load_model(encoder_path)
+            synthesizer = Synthesizer(synthesizer_path)
+            vocoder = gan_vocoder
+            vocoder.load_model(vocoder_path)
+        except PermissionError:
+            print(f'Cannot find tts models in {self.args.tts_models}')
+
+        # preprocess wav file
+        encoder_wav = synthesizer.load_preprocess_wav(self.args.voice)
+        embed, partial_embeds, _ = encoder.embed_utterance(encoder_wav, return_partials=True)  # generate voice embed
         embeds = [embed] * len(input_text)
         specs = synthesizer.synthesize_spectrograms(input_text, embeds)
         breaks = [spec.shape[1] for spec in specs]
@@ -103,7 +136,12 @@ class AiStreamer:
 
         # adjustment
         generated_wav = generated_wav / np.abs(generated_wav).max() * 0.97
-        file_name = 'output.wav'
-        sf.write(file_name, generated_wav, synthesizer.sample_rate)
+        file_name = self.args.streamer + '.wav'
+        save_path = os.path.join(self.args.audio_output, file_name)
+        sf.write(save_path, generated_wav, synthesizer.sample_rate)
 
         return generated_wav, synthesizer.sample_rate
+
+    def start_stream(self):
+        answer_text = self.generate_text()
+        answer_audio, _ = self.generate_audio(answer_text)
