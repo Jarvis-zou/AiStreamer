@@ -1,6 +1,10 @@
 import openai
 import os
 import jsonlines
+import numpy as np
+from TTS.models.synthesizer.inference import Synthesizer
+from TTS.models.encoder import inference as encoder
+from TTS.models.vocoder.hifigan import inference as gan_vocoder
 
 
 class AiStreamer:
@@ -74,3 +78,32 @@ class AiStreamer:
             )
             return result['choices'][0]['message']['content']
 
+    def generate_audio(self, target_wav, save_path):
+        """基于input_voice的声纹对input_text进行模拟，输出为使用克隆声音朗读input_text的音频wav"""
+        encoder_wav = synthesizer.load_preprocess_wav(input_voice_path)  # preprocess wav file
+        embed, partial_embeds, _ = encoder.embed_utterance(encoder_wav,
+                                                           return_partials=True)  # generate voice embed
+        embeds = [embed] * len(input_text)
+        specs = synthesizer.synthesize_spectrograms(input_text, embeds)
+        breaks = [spec.shape[1] for spec in specs]
+        spec = np.concatenate(specs, axis=1)
+
+        # generate voice
+        generated_wav, output_sample_rate = vocoder.infer_waveform(spec)
+
+        # adding breaks into voice
+        b_ends = np.cumsum(np.array(breaks) * synthesizer.hparams.hop_size)
+        b_starts = np.concatenate(([0], b_ends[:-1]))
+        wavs = [generated_wav[start:end] for start, end in zip(b_starts, b_ends)]
+        breaks = [np.zeros(int(0.15 * synthesizer.sample_rate))] * len(breaks)
+        generated_wav = np.concatenate([i for w, b in zip(wavs, breaks) for i in (w, b)])
+
+        # erase blank in voice
+        generated_wav = encoder.preprocess_wav(generated_wav)
+
+        # adjustment
+        generated_wav = generated_wav / np.abs(generated_wav).max() * 0.97
+        file_name = 'output.wav'
+        sf.write(file_name, generated_wav, synthesizer.sample_rate)
+
+        return generated_wav, synthesizer.sample_rate

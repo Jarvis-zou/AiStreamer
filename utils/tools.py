@@ -16,5 +16,6 @@ def clip_video(video_path, hms_start, hms_end, save_path):
         end_time = hms_end[0] * 60 * 60 + hms_end[1] * 60 + hms_end[2]
         clip = VideoClip(video_path).subclip(start_time, end_time)
         clip.write_video_file(save_path)
-    except :
-        print(f'Wrong from Form of start param should be (hour, minute, second)')
+    except TypeError:
+        print(f'WARNING: Wrong from Form of start param should be (hour, minute, second)')
+
