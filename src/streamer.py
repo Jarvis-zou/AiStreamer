@@ -1,4 +1,5 @@
 import openai
+import sys
 import os
 import jsonlines
 import random
@@ -7,11 +8,59 @@ import soundfile as sf
 import multiprocess as mp
 import queue
 import cv2
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtMultimediaWidgets import QVideoWidget
+from PyQt5.QtCore import QUrl
+from PyQt5.QtGui import QStandardItemModel
 from pathlib import Path
 from src.TTS.models.synthesizer.inference import Synthesizer
 from src.TTS.models.encoder import inference as encoder
 from src.TTS.models.vocoder.hifigan import inference as gan_vocoder
 
+
+class MainWindow(QMainWindow):
+    def __init__(self, parent=None):
+        super(MainWindow, self).__init__(parent)
+
+        central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
+
+        layout = QVBoxLayout(central_widget)
+
+        # 创建视频播放器
+        self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        video_widget = QVideoWidget()
+        self.media_player.setVideoOutput(video_widget)
+        layout.addWidget(video_widget)
+
+        # 创建文本输入框
+        self.text_input = QPlainTextEdit()
+        layout.addWidget(self.text_input)
+
+        # 创建音频输入按钮
+        audio_input_btn = QPushButton('开始音频输入')
+        audio_input_btn.clicked.connect(self.start_audio_input)
+        layout.addWidget(audio_input_btn)
+
+        # 初始化状态标签
+        self.status_label = QLabel('等待音频输入')
+        layout.addWidget(self.status_label)
+
+        # 设置窗口标题和大小
+        self.setWindowTitle('主窗口')
+        self.resize(800, 600)
+
+        # 播放视频
+        self.play_video('your_video_file.mp4')
+
+    def play_video(self, video_file):
+        self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(video_file)))
+        self.media_player.play()
+
+    def start_audio_input(self):
+        # 在此处实现开始音频输入的逻辑
+        self.status_label.setText('开始音频输入')
 
 class AiStreamer:
     def __init__(self, api_key, args):
@@ -157,12 +206,6 @@ class AiStreamer:
 
         return video_list
 
-    #
-    # @staticmethod
-    # def read_video_queue(video_path):
-
-
-
     def generate_video_local_test(self):
         """生成视频"""
         not_talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer), 'not_talking_source')
@@ -195,9 +238,13 @@ class AiStreamer:
 
 
 
+    def start_stream(self, input_type='text'):
+        #初始化窗口,同时开始播放画面
+        app = QApplication(sys.argv)
+        main_window = MainWindow()
+        main_window.show()
+        sys.exit(app.exec_())
 
-
-
-    def start_stream(self):
-        answer_text = self.generate_text()
-        answer_audio, _ = self.generate_audio(answer_text)
+        # self.get_inputs_from_typing()
+        # answer_text = self.generate_text()
+        # answer_audio, _ = self.generate_audio(answer_text)

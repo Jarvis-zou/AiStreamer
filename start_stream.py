@@ -19,4 +19,4 @@ args = parser.parse_args()
 
 
 streamer = AiStreamer(openai_key, args)
-streamer.generate_video_local_test()
+streamer.start_stream()
