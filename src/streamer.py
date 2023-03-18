@@ -1,8 +1,12 @@
 import openai
 import os
 import jsonlines
+import random
 import numpy as np
 import soundfile as sf
+import multiprocess as mp
+import queue
+import cv2
 from pathlib import Path
 from src.TTS.models.synthesizer.inference import Synthesizer
 from src.TTS.models.encoder import inference as encoder
@@ -141,6 +145,58 @@ class AiStreamer:
         sf.write(save_path, generated_wav, synthesizer.sample_rate)
 
         return generated_wav, synthesizer.sample_rate
+
+    @staticmethod
+    def load_video_queue(video_queue, video_path):
+        """创建进程队列保存VideoCapture对象"""
+        video_list = []
+        for file_name in os.listdir(video_path):
+            cap = cv2.VideoCapture(os.path.join(video_path, file_name))
+            video_list.append(cap)  # 先把所有文件的cap对象都读取到列表内
+            video_queue.put(cap)  # 初始化先把所有的视频加入队列
+
+        return video_list
+
+    #
+    # @staticmethod
+    # def read_video_queue(video_path):
+
+
+
+    def generate_video_local_test(self):
+        """生成视频"""
+        not_talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer), 'not_talking_source')
+        talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer), 'talking_source')
+        sync_result_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer), 'sync_result')
+
+        video_queue = queue.Queue(maxsize=10)
+        not_talking_video_list = self.load_video_queue(video_queue, not_talking_videos_source_path)
+        # 播放当前队列的第一个视频
+        cap = video_queue.get_nowait()
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                cv2.imshow("frame", frame)
+                cv2.waitKey(int(100 / fps))
+            else:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                # cap.release()
+                # print(f'{cap}released')
+                next_video_index = random.randrange(len(not_talking_video_list))
+                video_queue.put(not_talking_video_list[next_video_index])
+                # cap = video_queue.get()
+                cap = not_talking_video_list[0]
+
+
+
+        # video_queue = mp.Queue(10)
+        # self.load_video_queue(not_talking_videos_source_path)
+
+
+
+
+
 
     def start_stream(self):
         answer_text = self.generate_text()

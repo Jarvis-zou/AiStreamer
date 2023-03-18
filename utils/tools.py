@@ -12,10 +12,14 @@ def clip_video(video_path, hms_start, hms_end, save_path):
     :param save_path: str类型，剪辑结果保存路径
     """
     try:
-        start_time = hms_start[0] * 60 * 60 + hms_start[1] * 60 + hms_start[2]
-        end_time = hms_end[0] * 60 * 60 + hms_end[1] * 60 + hms_end[2]
-        clip = VideoClip(video_path).subclip(start_time, end_time)
-        clip.write_video_file(save_path)
+        clip = VideoFileClip(video_path).subclip(hms_start, hms_end)
+        clip.write_videofile(save_path)
     except TypeError:
-        print(f'WARNING: Wrong from Form of start param should be (hour, minute, second)')
+        print(f'WARNING: Wrong from Form of start param should be (hour, minute, second) or (minute, second) or second(int)')
+    except OSError:
+        pass
+
+def clip_audio(audio_path, hms_start, hms_end, save_path):
+    clip = AudioFileClip(audio_path).subclip(hms_start, hms_end)
+    clip.write_audiofile(save_path)
 

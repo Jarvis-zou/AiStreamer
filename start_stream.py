@@ -13,9 +13,10 @@ parser.add_argument("--text_input", type=str, default="./GPT_Inputs", help="Dir 
 parser.add_argument("--audio_input", type=str, default="./Audio_Inputs", help="Dir path where streamer/streamer.mp3 stores")
 parser.add_argument("--audio_output", type=str, default="./Audio_Outputs", help="Dir path where streamer/streamer.wav will be stored")
 parser.add_argument("--voice", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\AiStreamer\examples\wav\template.wav", help="Path to speaker voice file")
+parser.add_argument("--video_source", type=str, default="./videos", help="Path to speaker voice file")
 
 args = parser.parse_args()
 
 
 streamer = AiStreamer(openai_key, args)
-streamer.generate_audio()
+streamer.generate_video_local_test()
