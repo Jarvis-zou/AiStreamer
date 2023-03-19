@@ -1,24 +1,26 @@
-from os import listdir, path
 import numpy as np
-import scipy, cv2, os, sys, argparse, audio
-import json, subprocess, random, string
+import cv2
+import os
+import argparse
+import subprocess
 from tqdm import tqdm
-from glob import glob
-import torch, face_detection
-from models import Wav2Lip
+import torch
+import src.Wav2Lip.face_detection as face_detection
+from src.Wav2Lip.models import Wav2Lip
 import platform
+import audio
 
 parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
 
-parser.add_argument('--checkpoint_path', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\Wav2Lip\checkpoints\lipsync_expert.pth",
-					help='Name of saved checkpoint to load weights from', required=True)
+# parser.add_argument('--checkpoint_path', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\Wav2Lip\checkpoints\lipsync_expert.pth",
+# 					help='Name of saved checkpoint to load weights from', required=True)
 
-parser.add_argument('--face', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\AiStreamer\videos\fengge\talking_5.mp4",
-					help='Filepath of video/image that contains faces to use', required=True)
-parser.add_argument('--audio', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\AiStreamer\Audio_Outputs\fengge.wav",
-					help='Filepath of video/audio file to use as raw audio source', required=True)
-parser.add_argument('--outfile', type=str, help='Video path to save result. See default for an e.g.', 
-								default='results/result_voice.mp4')
+# parser.add_argument('--face', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\AiStreamer\videos\fengge\talking_5.mp4",
+# 					help='Filepath of video/image that contains faces to use', required=True)
+# parser.add_argument('--audio', type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\AiStreamer\Audio_Outputs\fengge.wav",
+# 					help='Filepath of video/audio file to use as raw audio source', required=True)
+# parser.add_argument('--outfile', type=str, help='Video path to save result. See default for an e.g.',
+# 								default='results/result_voice.mp4')
 
 parser.add_argument('--static', type=bool, 
 					help='If True, then use only first video frame for inference', default=False)
@@ -53,8 +55,6 @@ parser.add_argument('--nosmooth', default=False, action='store_true',
 args = parser.parse_args()
 args.img_size = 96
 
-if os.path.isfile(args.face) and args.face.split('.')[1] in ['jpg', 'png', 'jpeg']:
-	args.static = True
 
 def get_smoothened_boxes(boxes, T):
 	for i in range(len(boxes)):
@@ -178,8 +178,12 @@ def load_model(path):
 	model = model.to(device)
 	return model.eval()
 
-def main():
-	print(args.face)
+
+def sync_lip(ckpt, face, audio_input, outfile):
+	args.checkpoint_path = ckpt
+	args.face = face
+	args.audio = audio_input
+	args.outfile = outfile
 	if not os.path.isfile(args.face):
 		raise ValueError('--face argument must be a valid path to video/image file')
 
@@ -230,7 +234,7 @@ def main():
 		raise ValueError('Mel contains nan! Using a TTS voice? Add a small epsilon noise to the wav file and try again')
 
 	mel_chunks = []
-	mel_idx_multiplier = 80./fps 
+	mel_idx_multiplier = 80./fps
 	i = 0
 	while 1:
 		start_idx = int(i * mel_idx_multiplier)
@@ -247,14 +251,14 @@ def main():
 	batch_size = args.wav2lip_batch_size
 	gen = datagen(full_frames.copy(), mel_chunks)
 
-	for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
+	for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen,
 											total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
 		if i == 0:
 			model = load_model(args.checkpoint_path)
 			print ("Model loaded")
 
 			frame_h, frame_w = full_frames[0].shape[:-1]
-			out = cv2.VideoWriter('temp/result.avi', 
+			out = cv2.VideoWriter('temp/result.avi',
 									cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
 
 		img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
@@ -264,7 +268,7 @@ def main():
 			pred = model(mel_batch, img_batch)
 
 		pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
-		
+
 		for p, f, c in zip(pred, frames, coords):
 			y1, y2, x1, x2 = c
 			p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
@@ -277,5 +281,3 @@ def main():
 	command = 'ffmpeg -y -i {} -i {} -strict -2 -q:v 1 {}'.format(args.audio, 'temp/result.avi', args.outfile)
 	subprocess.call(command, shell=platform.system() != 'Windows')
 
-if __name__ == '__main__':
-	main()
