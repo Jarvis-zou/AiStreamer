@@ -8,7 +8,7 @@ import torch
 import src.Wav2Lip.face_detection as face_detection
 from src.Wav2Lip.models import Wav2Lip
 import platform
-import audio
+import librosa
 
 parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
 
@@ -176,11 +176,11 @@ def load_model(path):
 	model.load_state_dict(new_s)
 
 	model = model.to(device)
+	print(f"Model Loading finished.")
 	return model.eval()
 
 
 def sync_lip(ckpt, face, audio_input, outfile):
-	args.checkpoint_path = ckpt
 	args.face = face
 	args.audio = audio_input
 	args.outfile = outfile
@@ -217,8 +217,6 @@ def sync_lip(ckpt, face, audio_input, outfile):
 
 			full_frames.append(frame)
 
-	print ("Number of frames available for inference: "+str(len(full_frames)))
-
 	if not args.audio.endswith('.wav'):
 		print('Extracting raw audio...')
 		command = 'ffmpeg -y -i {} -strict -2 {}'.format(args.audio, 'temp/temp.wav')
@@ -226,9 +224,8 @@ def sync_lip(ckpt, face, audio_input, outfile):
 		subprocess.call(command, shell=True)
 		args.audio = 'temp/temp.wav'
 
-	wav = audio.load_wav(args.audio, 16000)
-	mel = audio.melspectrogram(wav)
-	print(mel.shape)
+	wav, sr = librosa.load(args.audio, sr=16000)
+	mel = librosa.feature.melspectrogram(y=wav, sr=sr)
 
 	if np.isnan(mel.reshape(-1)).sum() > 0:
 		raise ValueError('Mel contains nan! Using a TTS voice? Add a small epsilon noise to the wav file and try again')
@@ -244,8 +241,6 @@ def sync_lip(ckpt, face, audio_input, outfile):
 		mel_chunks.append(mel[:, start_idx : start_idx + mel_step_size])
 		i += 1
 
-	print("Length of mel chunks: {}".format(len(mel_chunks)))
-
 	full_frames = full_frames[:len(mel_chunks)]
 
 	batch_size = args.wav2lip_batch_size
@@ -254,8 +249,7 @@ def sync_lip(ckpt, face, audio_input, outfile):
 	for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen,
 											total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
 		if i == 0:
-			model = load_model(args.checkpoint_path)
-			print ("Model loaded")
+			model = ckpt
 
 			frame_h, frame_w = full_frames[0].shape[:-1]
 			out = cv2.VideoWriter('temp/result.avi',
