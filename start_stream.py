@@ -23,7 +23,7 @@ parser.add_argument("--audio_output", type=str, default="./Audio_Outputs",
 parser.add_argument("--voice", type=str,
                     default=r"C:\Users\Administrator\Desktop\workspace\AiStreamer\examples\wav\fengge016.wav",
                     help="Path to speaker voice file")
-parser.add_argument("--video_source", type=str, default=r"C:\Users\Administrator\Desktop\workspace\source",
+parser.add_argument("--video_source", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\source",
                     help="Path to speaker video file")
 
 args = parser.parse_args()
