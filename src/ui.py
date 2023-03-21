@@ -80,10 +80,8 @@ class MainWindow(QMainWindow):
         """监听待播放视频队列并告知主窗口下一个播放视频的地址"""
         while True:
             if not self.streamer.video_queue.empty():
-                if self.streamer.video_ready_signal is True:  # 当口型视频未生成好时
-                    self.next_video = self.streamer.sync_result_path
-                else:
-                    self.next_video = self.streamer.video_queue.get()
+                self.next_video = self.streamer.video_queue.get()
+                print(self.next_video)
 
     def submit_text_question(self):
         question_text = self.question_input.toPlainText()
@@ -115,18 +113,18 @@ class MainWindow(QMainWindow):
         # 显示对话框
         self.text_input_dialog.show()
 
-    def ask_audio_question(self):
-        print(f"音频输入:")
-
     def handle_state_changed(self, state):
         if state == QMediaPlayer.StoppedState:
             new_video_url = QUrl.fromLocalFile(self.next_video)
             # 设置新的视频文件并播放
             self.media_player.setMedia(QMediaContent(new_video_url))
             if self.streamer.video_ready_signal is True:
+                print(new_video_url)
                 self.streamer.play_generated_audio()
                 self.media_player.play()
                 time.sleep(0.5)
+                self.streamer.video_ready_signal = False
+                self.streamer.audio_ready_signal = False
             else:
                 self.media_player.play()
                 time.sleep(0.5)

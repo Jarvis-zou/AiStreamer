@@ -1,5 +1,4 @@
-import threading
-import queue
+import multiprocessing as mp
 import openai
 import os
 import jsonlines
@@ -35,8 +34,8 @@ class AiStreamer:
         # 建立通信队列和signal
         self.audio_ready_signal = False  # 确定TTS语音是否已经生成完成
         self.video_ready_signal = False  # 确定lip视频是否已经生成完成
-        self.text_input = queue.Queue()  # 问题输入队列
-        self.video_queue = queue.Queue()  # 存放下一个播放视频的队列
+        self.text_input = mp.Queue()  # 问题输入队列
+        self.video_queue = mp.Queue()  # 存放下一个播放视频的队列
 
     def read_jsonl(self):
         """
@@ -84,7 +83,6 @@ class AiStreamer:
         # 区分3.5模型和其他老模型，因为接口调用方式不一样
         if self.args.model_name == 'gpt-3.5-turbo':
             massages = self.read_jsonl()
-            print(f'开始调用')
             result = openai.ChatCompletion.create(
                 model=self.args.model_name,
                 messages=massages,
@@ -139,6 +137,18 @@ class AiStreamer:
         self.audio_ready_signal = True
         print(f'TTS数据生成完毕...')
 
+    def generata_video(self):
+        # 随机挑选一个视频进行合成
+        talking_videos_source_list = self.load_video(self.talking_videos_source_path)
+        face_index = random.randrange(len(talking_videos_source_list))
+        face = talking_videos_source_list[face_index]
+        sync_lip(ckpt=self.wav2lip_model,
+                 face=face,
+                 audio_input=os.path.join(self.args.audio_output, self.args.streamer + '.wav'),
+                 outfile=self.sync_result_path)
+        self.video_ready_signal = True
+        print(f'video数据生成完毕...')
+
     @staticmethod
     def load_video(video_path):
         """创建进程队列保存VideoCapture对象"""
@@ -148,26 +158,14 @@ class AiStreamer:
             video_list.append(video)  # 先把所有文件的cap对象都读取到列表内
         return video_list
 
-    def generate_video(self):
+    def load_next_video(self):
         """给出主窗口下一个待播放的视频地址"""
         while True:
             if self.video_queue.empty():
-                if self.audio_ready_signal:
-                    # 随机挑选一个视频进行合成
-                    talking_videos_source_list = self.load_video(self.talking_videos_source_path)
-                    face_index = random.randrange(len(talking_videos_source_list))
-                    face = talking_videos_source_list[face_index]
-                    sync_lip(ckpt=self.wav2lip_model,
-                             face=face,
-                             audio_input=os.path.join(self.args.audio_output, self.args.streamer + '.wav'),
-                             outfile=self.sync_result_path)
-                    self.video_ready_signal = True
-                    print(f'video数据生成完毕...')
-                else:
-                    not_talking_video_list = self.load_video(self.not_talking_videos_source_path)
-                    next_video_index = random.randrange(len(not_talking_video_list))
-                    next_video = not_talking_video_list[next_video_index]
-                    self.video_queue.put(next_video)  # 下一个待播放视频为随机挑选的not talking video
+                not_talking_video_list = self.load_video(self.not_talking_videos_source_path)
+                next_video_index = random.randrange(len(not_talking_video_list))
+                next_video = not_talking_video_list[next_video_index]
+                self.video_queue.put(next_video)  # 下一个待播放视频为随机挑选的not talking video
 
     def generate_answer(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
@@ -175,13 +173,13 @@ class AiStreamer:
             if not self.text_input.empty():  # 监听到文本输入则进入pipline: 答案生成 -> 语音合成 -> 口型生成
                 text_answer = self.generate_text()
                 self.generate_audio(input_text=text_answer)
-
+                self.generata_video()
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # 启动 generate_video 线程，监听self.audio_answer_queue
-        generate_video_thread = threading.Thread(target=self.generate_video)
-        generate_video_thread.start()
+        # 启动 generate_video 线程
+        load_next_video_process = mp.Process(target=self.load_next_video)
+        load_next_video_process.start()
 
         # 启动generate_answer线程
-        generate_answer_thread = threading.Thread(target=self.generate_answer)
-        generate_answer_thread.start()
+        generate_answer_process = mp.Process(target=self.generate_answer)
+        generate_answer_process.start()
