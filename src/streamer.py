@@ -24,7 +24,7 @@ class AiStreamer:
         self.talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
                                                        'talking_source')
         self.sync_result_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
-                                             'sync_result/result_voice.mp4')
+                                             'sync_result/result_video.avi')
 
         # 预加载TTS模型路径
 
@@ -35,7 +35,6 @@ class AiStreamer:
         self.audio_ready_signal = False  # 确定TTS语音是否已经生成完成
         self.video_ready_signal = False  # 确定lip视频是否已经生成完成
         self.text_input = mp.Queue()  # 问题输入队列
-        self.video_queue = mp.Queue()  # 存放下一个播放视频的队列
 
     def read_jsonl(self):
         """
@@ -124,9 +123,12 @@ class AiStreamer:
         return path
 
     def play_generated_audio(self):
-        wav_file_path = Path(self.args.audio_output) / Path(self.args.streamer + '.wav')
-        audio = AudioSegment.from_file(wav_file_path)
-        play(audio)
+        while True:
+            if self.audio_ready_signal is True:
+                wav_file_path = Path(self.args.audio_output) / Path(self.args.streamer + '.wav')
+                audio = AudioSegment.from_file(wav_file_path)
+                play(audio)
+                self.audio_ready_signal = False
 
     def generate_audio(self, input_text):
         """根据GPT API的文字答案生成对应人物音色的wav语音文件并保存到指定的路径下"""
@@ -165,7 +167,6 @@ class AiStreamer:
         next_video_index = random.randrange(len(not_talking_video_list))
         next_video = not_talking_video_list[next_video_index]
         return next_video
-        # self.video_queue.put(next_video)  # 下一个待播放视频为随机挑选的not talking video
 
     def generate_answer(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
@@ -177,10 +178,10 @@ class AiStreamer:
 
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # 启动 generate_video 线程
+        # 启动 generate_video 进程
         load_next_video_process = mp.Process(target=self.load_next_video)
         load_next_video_process.start()
 
-        # 启动generate_answer线程
+        # 启动generate_answer 进程
         generate_answer_process = mp.Process(target=self.generate_answer)
         generate_answer_process.start()

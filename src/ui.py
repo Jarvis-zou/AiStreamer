@@ -15,17 +15,13 @@ class MainWindow(QMainWindow):
         self.streamer = streamer
         self.streamer.start_stream()  # 初始化streamer，启动各个线程并提前加载模型
 
-        # 初始化待播放视频变量
-        self.next_video = None
-
-        # 启动独立线程监听待播放视频队列
-        checking_next_video_thread = threading.Thread(target=self._checking_next_video)
-        checking_next_video_thread.start()
+        # 是否要播放生成视频的信号
+        self.answer_signal = False
 
         # 创建 QVideoWidget
         self.video_widget = QVideoWidget()
-        # self.video_widget.setFixedSize(720, 1200)
-        self.video_widget.setFixedSize(360, 600)
+        self.video_widget.setFixedSize(720, 1200)
+        # self.video_widget.setFixedSize(360, 600)
 
         # 设置窗口标题和大小
         self.setWindowTitle('Streaming')
@@ -36,8 +32,6 @@ class MainWindow(QMainWindow):
         self.media_player.setVideoOutput(self.video_widget)
 
         # 加载并播放一个视频文件
-        time.sleep(1)  # 等待线程启动和视频队列加载
-        # video_url = QUrl.fromLocalFile(self.next_video)
         video_url = QUrl.fromLocalFile(self.streamer.load_next_video())
         self.media_player.setMedia(QMediaContent(video_url))
         self.media_player.stateChanged.connect(self.handle_state_changed)
@@ -46,6 +40,10 @@ class MainWindow(QMainWindow):
         # 创建 QPushButton 用于提问
         self.text_ask_button = QPushButton("文本提问")
         self.text_ask_button.clicked.connect(self.ask_text_question)
+
+        # 创建播放按钮
+        self.play_button = QPushButton("看看回答")
+        self.play_button.clicked.connect(lambda: self.play_specific_video())
 
         # 创建只读的QLabel组件
         self.text_label = QLabel()
@@ -77,12 +75,7 @@ class MainWindow(QMainWindow):
 
         # 将 QPushButton 添加到 QLabel 组件的布局中
         text_container.layout().addWidget(self.text_ask_button)
-
-    def _checking_next_video(self):
-        """监听待播放视频队列并告知主窗口下一个播放视频的地址"""
-        while True:
-            if not self.streamer.video_queue.empty():
-                self.next_video = self.streamer.video_queue.get()
+        text_container.layout().addWidget(self.play_button)
 
     def submit_text_question(self):
         question_text = self.question_input.toPlainText()
@@ -116,20 +109,21 @@ class MainWindow(QMainWindow):
 
     def handle_state_changed(self, state):
         if state == QMediaPlayer.StoppedState:
-            self.next_video = self.streamer.load_next_video()
-            new_video_url = QUrl.fromLocalFile(self.next_video)
-            # 设置新的视频文件并播放
-            self.media_player.setMedia(QMediaContent(new_video_url))
-            if self.streamer.video_ready_signal is True:
-                print(f'合成音视频已经准备完毕，准备播放中...')
-                self.streamer.play_generated_audio()
+            if self.answer_signal is False:
+                new_video_url = QUrl.fromLocalFile(self.streamer.load_next_video())
+                self.media_player.setMedia(QMediaContent(new_video_url))
                 self.media_player.play()
-                time.sleep(0.5)
-                self.streamer.video_ready_signal = False
-                self.streamer.audio_ready_signal = False
             else:
+                new_video_url = QUrl.fromLocalFile(self.streamer.sync_result_path)
+                self.media_player.setMedia(QMediaContent(new_video_url))
                 self.media_player.play()
-                time.sleep(0.5)
+                self.answer_signal = False
+
+    def play_specific_video(self):
+        self.answer_signal = True
+        self.media_player.stop()
+
+
 
 
 
