@@ -24,7 +24,8 @@ class MainWindow(QMainWindow):
 
         # 创建 QVideoWidget
         self.video_widget = QVideoWidget()
-        self.video_widget.setFixedSize(720, 1200)
+        # self.video_widget.setFixedSize(720, 1200)
+        self.video_widget.setFixedSize(360, 600)
 
         # 设置窗口标题和大小
         self.setWindowTitle('Streaming')
@@ -36,7 +37,8 @@ class MainWindow(QMainWindow):
 
         # 加载并播放一个视频文件
         time.sleep(1)  # 等待线程启动和视频队列加载
-        video_url = QUrl.fromLocalFile(self.next_video)
+        # video_url = QUrl.fromLocalFile(self.next_video)
+        video_url = QUrl.fromLocalFile(self.streamer.load_next_video())
         self.media_player.setMedia(QMediaContent(video_url))
         self.media_player.stateChanged.connect(self.handle_state_changed)
         self.media_player.play()
@@ -81,7 +83,6 @@ class MainWindow(QMainWindow):
         while True:
             if not self.streamer.video_queue.empty():
                 self.next_video = self.streamer.video_queue.get()
-                print(self.next_video)
 
     def submit_text_question(self):
         question_text = self.question_input.toPlainText()
@@ -115,11 +116,12 @@ class MainWindow(QMainWindow):
 
     def handle_state_changed(self, state):
         if state == QMediaPlayer.StoppedState:
+            self.next_video = self.streamer.load_next_video()
             new_video_url = QUrl.fromLocalFile(self.next_video)
             # 设置新的视频文件并播放
             self.media_player.setMedia(QMediaContent(new_video_url))
             if self.streamer.video_ready_signal is True:
-                print(new_video_url)
+                print(f'合成音视频已经准备完毕，准备播放中...')
                 self.streamer.play_generated_audio()
                 self.media_player.play()
                 time.sleep(0.5)

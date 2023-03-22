@@ -15,7 +15,7 @@ from pydub.playback import play
 
 class AiStreamer:
     def __init__(self, api_key, args):
-        openai.api_key = api_key
+        self.api_key = api_key
         self.args = args
 
         # 初始化预设video路径
@@ -78,6 +78,7 @@ class AiStreamer:
 
     def generate_text(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
+        openai.api_key = self.api_key
         question = self.text_input.get()
         print(f'提问：{question}')
         # 区分3.5模型和其他老模型，因为接口调用方式不一样
@@ -160,12 +161,11 @@ class AiStreamer:
 
     def load_next_video(self):
         """给出主窗口下一个待播放的视频地址"""
-        while True:
-            if self.video_queue.empty():
-                not_talking_video_list = self.load_video(self.not_talking_videos_source_path)
-                next_video_index = random.randrange(len(not_talking_video_list))
-                next_video = not_talking_video_list[next_video_index]
-                self.video_queue.put(next_video)  # 下一个待播放视频为随机挑选的not talking video
+        not_talking_video_list = self.load_video(self.not_talking_videos_source_path)
+        next_video_index = random.randrange(len(not_talking_video_list))
+        next_video = not_talking_video_list[next_video_index]
+        return next_video
+        # self.video_queue.put(next_video)  # 下一个待播放视频为随机挑选的not talking video
 
     def generate_answer(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
@@ -174,6 +174,7 @@ class AiStreamer:
                 text_answer = self.generate_text()
                 self.generate_audio(input_text=text_answer)
                 self.generata_video()
+
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
         # 启动 generate_video 线程
