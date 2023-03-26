@@ -1,14 +1,15 @@
 import multiprocessing as mp
 import openai
-import os
 import jsonlines
 import random
+import soundfile as sf
+import os
 from pathlib import Path
-from src.TTS.models.synthesizer.inference import Synthesizer
-from src.TTS.models.encoder import inference as encoder
-from src.TTS.models.vocoder.hifigan import inference as gan_vocoder
+from paddlespeech.t2s.exps.syn_utils import get_am_output
+from paddlespeech.t2s.exps.syn_utils import get_frontend
+from paddlespeech.t2s.exps.syn_utils import get_predictor
+from paddlespeech.t2s.exps.syn_utils import get_voc_output
 from src.Wav2Lip.inference import sync_lip, load_model
-from gtts import gTTS
 from pydub import AudioSegment
 from pydub.playback import play
 
@@ -86,7 +87,7 @@ class AiStreamer:
             result = openai.ChatCompletion.create(
                 model=self.args.model_name,
                 messages=massages,
-                temperature=0.8,
+                temperature=0.4,
                 top_p=1,
                 n=1,
                 presence_penalty=0.2,
@@ -131,16 +132,55 @@ class AiStreamer:
                 self.audio_ready_signal = False
 
     def generate_audio(self, input_text):
-        """根据GPT API的文字答案生成对应人物音色的wav语音文件并保存到指定的路径下"""
-        tts = gTTS(text=input_text, lang='zh-cn')
-        # 保存WAV音频到指定文件路径
-        file_name = self.args.streamer + '.wav'
-        save_path = os.path.join(self.args.audio_output, file_name)
-        tts.save(save_path)
+        """paddlespeech本地推理"""
+        am_inference_dir = self.args.encoder
+        voc_inference_dir = self.args.vocoder
+        wav_output_dir = self.args.audio_output
+        device = self.args.device
+
+        # frontend
+        frontend = get_frontend(
+            lang="mix",
+            phones_dict=os.path.join(am_inference_dir, "phone_id_map.txt"),
+            tones_dict=None
+        )
+
+        # am_predictor
+        am_predictor = get_predictor(
+            model_dir=am_inference_dir,
+            model_file="fastspeech2_mix" + ".pdmodel",
+            params_file="fastspeech2_mix" + ".pdiparams",
+            device=device)
+
+        # voc_predictor
+        voc_predictor = get_predictor(
+            model_dir=voc_inference_dir,
+            model_file="pwgan_aishell3" + ".pdmodel",
+            params_file="pwgan_aishell3" + ".pdiparams",
+            device=device)
+
+        output_dir = Path(wav_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        merge_sentences = True
+        fs = 24000
+        am_output_data = get_am_output(
+            input=input_text,
+            am_predictor=am_predictor,
+            am="fastspeech2_mix",
+            frontend=frontend,
+            lang="mix",
+            merge_sentences=merge_sentences,
+            speaker_dict=os.path.join(am_inference_dir, "phone_id_map.txt"),
+            spk_id=0, )
+        wav = get_voc_output(
+            voc_predictor=voc_predictor, input=am_output_data)
+        # 保存文件
+        sf.write(output_dir / "fengge.wav", wav, samplerate=fs)
         self.audio_ready_signal = True
         print(f'TTS数据生成完毕...')
 
-    def generata_video(self):
+    def generate_video(self):
         # 随机挑选一个视频进行合成
         talking_videos_source_list = self.load_video(self.talking_videos_source_path)
         face_index = random.randrange(len(talking_videos_source_list))
@@ -174,7 +214,7 @@ class AiStreamer:
             if not self.text_input.empty():  # 监听到文本输入则进入pipline: 答案生成 -> 语音合成 -> 口型生成
                 text_answer = self.generate_text()
                 self.generate_audio(input_text=text_answer)
-                self.generata_video()
+                self.generate_video()
 
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
