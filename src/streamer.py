@@ -5,6 +5,7 @@ import jsonlines
 import random
 import soundfile as sf
 import os
+import time
 from pathlib import Path
 from src.listen_chats import listen
 from paddlespeech.t2s.exps.syn_utils import get_am_output
@@ -27,19 +28,16 @@ class AiStreamer:
         self.talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
                                                        'talking_source')
         self.sync_result_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
-                                             'sync_result/result_video.avi')
-
-        # 预加载TTS模型路径
+                                             'sync_result')
 
         # 预加载lip_sync model
         self.wav2lip_model = load_model(self.args.wav2lip_model)
 
-        # 建立通信队列和signal
-        self.audio_ready_signal = False  # 确定TTS语音是否已经生成完成
-        self.video_ready_signal = False  # 确定lip视频是否已经生成完成
-        self.text_input = mp.Queue()  # 问题输入队列
+        # 建立输入的通信队列
         self.normal_chats = mp.Queue()  # 普通弹幕队列
         self.sc_chats = mp.Queue()  # sc留言队列
+
+        self.content_id = 0  # 当前音视频文件生成后的名称（编号），根据编号进行播放
 
     def listen_chats(self):
         """实时监听直播间的普通弹幕和付费SC留言"""
@@ -71,8 +69,9 @@ class AiStreamer:
 
     def get_inputs_from_typing(self, question):
         """替代音频输入，将问题写入jsonl文件中"""
-        self.write_jsonl(question)
-        self.text_input.put(question)
+        uname, msg = question[0], question[1]
+        processed_question = uname + '问：' + msg
+        self.write_jsonl(processed_question)
 
     def transcribe_audio(self):
         """对指定音频进行语音识别"""
@@ -87,8 +86,6 @@ class AiStreamer:
     def generate_text(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
         openai.api_key = self.api_key
-        question = self.text_input.get()
-        print(f'提问：{question}')
         # 区分3.5模型和其他老模型，因为接口调用方式不一样
         if self.args.model_name == 'gpt-3.5-turbo':
             massages = self.read_jsonl()
@@ -96,20 +93,6 @@ class AiStreamer:
                 model=self.args.model_name,
                 messages=massages,
                 temperature=0.4,
-                top_p=1,
-                n=1,
-                presence_penalty=0.2,
-                frequency_penalty=0.2
-            )
-            answer = result['choices'][0]['message']['content']
-            print(f'回答：{answer}')
-            return answer
-        else:
-            prompt = self.read_jsonl()[0]  # 非3.5模型使用prompt而非messages形式作为输入，仅有一行信息
-            result = openai.Completion.create(
-                model=self.args.model_name,
-                prompt=prompt,
-                temperature=0.8,
                 top_p=1,
                 n=1,
                 presence_penalty=0.2,
@@ -131,13 +114,13 @@ class AiStreamer:
                 print(path)
         return path
 
-    def play_generated_audio(self):
-        while True:
-            if self.audio_ready_signal is True:
-                wav_file_path = Path(self.args.audio_output) / Path(self.args.streamer + '.wav')
-                audio = AudioSegment.from_file(wav_file_path)
-                play(audio)
-                self.audio_ready_signal = False
+    # def play_generated_audio(self):
+    #     while True:
+    #         if self.audio_ready_signal is True:
+    #             wav_file_path = Path(self.args.audio_output) / Path(self.args.streamer + '.wav')
+    #             audio = AudioSegment.from_file(wav_file_path)
+    #             play(audio)
+    #             self.audio_ready_signal = False
 
     def generate_audio(self, input_text):
         """paddlespeech本地推理"""
@@ -183,9 +166,10 @@ class AiStreamer:
             spk_id=0, )
         wav = get_voc_output(
             voc_predictor=voc_predictor, input=am_output_data)
+
         # 保存文件
-        sf.write(output_dir / "fengge.wav", wav, samplerate=fs)
-        self.audio_ready_signal = True
+        wav_id = str(self.content_id) + ".wav"
+        sf.write(output_dir / wav_id, wav, samplerate=fs)
         print(f'TTS数据生成完毕...')
 
     def generate_video(self):
@@ -195,9 +179,8 @@ class AiStreamer:
         face = talking_videos_source_list[face_index]
         sync_lip(ckpt=self.wav2lip_model,
                  face=face,
-                 audio_input=os.path.join(self.args.audio_output, self.args.streamer + '.wav'),
-                 outfile=self.sync_result_path)
-        self.video_ready_signal = True
+                 audio_input=os.path.join(self.args.audio_output, str(self.content_id) + '.wav'),
+                 outfile=os.path.join(self.sync_result_path, str(self.content_id) + '.avi'))
         print(f'video数据生成完毕...')
 
     @staticmethod
@@ -216,25 +199,31 @@ class AiStreamer:
         next_video = not_talking_video_list[next_video_index]
         return next_video
 
-    def generate_answer(self):
+    def generate_answer(self, question):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
-        while True:
-            if not self.text_input.empty():  # 监听到文本输入则进入pipline: 答案生成 -> 语音合成 -> 口型生成
-                text_answer = self.generate_text()
-                self.generate_audio(input_text=text_answer)
-                self.generate_video()
+        self.content_id += 1  # 确认编号
+        self.get_inputs_from_typing(question=question)  # 将问题写入jsonl中的message模板
+        text_answer = self.generate_text()
+        self.generate_audio(input_text=text_answer)
+        self.generate_video()
 
-    def generate_answer_test(self):
+    def processing_chats(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
         while True:
-            if not self.normal_chats.empty():  # 监听到文本输入则进入pipline: 答案生成 -> 语音合成 -> 口型生成
-                print(f'监听到问题')
-                question = self.normal_chats.get()
-                print(question)
+
+            if not self.sc_chats.empty():  # 优先读取sc弹幕的留言
+                sc_question = self.sc_chats.get()
+                print(f'SC留言:{sc_question}')
+                time.sleep(5)
+                # self.generate_answer(question=sc_question)
+            if not self.normal_chats.empty() and self.sc_chats.empty():  # 如果sc留言队列为空则开始处理普通弹幕
+                normal_question = self.normal_chats.get()
+                print(f'普通留言:{normal_question}')
+                self.generate_answer(question=normal_question)
 
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # 启动 load_next_video 进程
+        # 启动 listen_chats 进程
         listen_chats_process = mp.Process(target=self.listen_chats)
         listen_chats_process.start()
 
@@ -242,6 +231,6 @@ class AiStreamer:
         # load_next_video_process = mp.Process(target=self.load_next_video)
         # load_next_video_process.start()
 
-        # 启动 generate_answer 进程
-        generate_answer_process = mp.Process(target=self.generate_answer_test)
-        generate_answer_process.start()
+        # 启动 processing_chats 进程
+        processing_chats_process = mp.Process(target=self.processing_chats)
+        processing_chats_process.start()
