@@ -1,10 +1,12 @@
 import multiprocessing as mp
 import openai
+import asyncio
 import jsonlines
 import random
 import soundfile as sf
 import os
 from pathlib import Path
+from src.listen_chats import listen
 from paddlespeech.t2s.exps.syn_utils import get_am_output
 from paddlespeech.t2s.exps.syn_utils import get_frontend
 from paddlespeech.t2s.exps.syn_utils import get_predictor
@@ -36,6 +38,12 @@ class AiStreamer:
         self.audio_ready_signal = False  # 确定TTS语音是否已经生成完成
         self.video_ready_signal = False  # 确定lip视频是否已经生成完成
         self.text_input = mp.Queue()  # 问题输入队列
+        self.normal_chats = mp.Queue()  # 普通弹幕队列
+        self.sc_chats = mp.Queue()  # sc留言队列
+
+    def listen_chats(self):
+        """实时监听直播间的普通弹幕和付费SC留言"""
+        asyncio.run(listen(self.args.room_id, self.normal_chats, self.sc_chats))
 
     def read_jsonl(self):
         """
@@ -216,12 +224,24 @@ class AiStreamer:
                 self.generate_audio(input_text=text_answer)
                 self.generate_video()
 
+    def generate_answer_test(self):
+        """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
+        while True:
+            if not self.normal_chats.empty():  # 监听到文本输入则进入pipline: 答案生成 -> 语音合成 -> 口型生成
+                print(f'监听到问题')
+                question = self.normal_chats.get()
+                print(question)
+
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # 启动 generate_video 进程
-        load_next_video_process = mp.Process(target=self.load_next_video)
-        load_next_video_process.start()
+        # 启动 load_next_video 进程
+        listen_chats_process = mp.Process(target=self.listen_chats)
+        listen_chats_process.start()
 
-        # 启动generate_answer 进程
-        generate_answer_process = mp.Process(target=self.generate_answer)
+        # # 启动 load_next_video 进程
+        # load_next_video_process = mp.Process(target=self.load_next_video)
+        # load_next_video_process.start()
+
+        # 启动 generate_answer 进程
+        generate_answer_process = mp.Process(target=self.generate_answer_test)
         generate_answer_process.start()
