@@ -5,7 +5,6 @@ import jsonlines
 import random
 import soundfile as sf
 import os
-import time
 from pathlib import Path
 from src.listen_chats import listen
 from paddlespeech.t2s.exps.syn_utils import get_am_output
@@ -13,8 +12,6 @@ from paddlespeech.t2s.exps.syn_utils import get_frontend
 from paddlespeech.t2s.exps.syn_utils import get_predictor
 from paddlespeech.t2s.exps.syn_utils import get_voc_output
 from src.Wav2Lip.inference import sync_lip, load_model
-from pydub import AudioSegment
-from pydub.playback import play
 
 
 class AiStreamer:
@@ -30,8 +27,7 @@ class AiStreamer:
         self.sync_result_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
                                              'sync_result')
 
-        # 预加载lip_sync model
-        self.wav2lip_model = load_model(self.args.wav2lip_model)
+        self.wav2lip_model = None
 
         # 建立输入的通信队列
         self.normal_chats = mp.Queue()  # 普通弹幕队列
@@ -209,13 +205,14 @@ class AiStreamer:
 
     def processing_chats(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
+        if not self.wav2lip_model:
+            # 预加载lip_sync model
+            self.wav2lip_model = load_model(self.args.wav2lip_model)
         while True:
-
             if not self.sc_chats.empty():  # 优先读取sc弹幕的留言
                 sc_question = self.sc_chats.get()
                 print(f'SC留言:{sc_question}')
-                time.sleep(5)
-                # self.generate_answer(question=sc_question)
+                self.generate_answer(question=sc_question)
             if not self.normal_chats.empty() and self.sc_chats.empty():  # 如果sc留言队列为空则开始处理普通弹幕
                 normal_question = self.normal_chats.get()
                 print(f'普通留言:{normal_question}')

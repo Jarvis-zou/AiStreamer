@@ -12,7 +12,7 @@ openai_key = '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'
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_name", type=str, default="gpt-3.5-turbo", help="Model type you want to choose")
 parser.add_argument("--device", type=str, default="gpu")
-parser.add_argument("--room_id", type=int, default=1468635)
+parser.add_argument("--room_id", type=int, default=23375552)
 parser.add_argument("--streamer", type=str, default='fengge',
                     help="Streamer name, should be same with instructions file name")
 parser.add_argument("--encoder", type=str, default=r"C:\Users\Administrator\Desktop\workspace\source\ckpt\fengge", help="Dir where encoder models stores")
