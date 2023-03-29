@@ -18,6 +18,8 @@ class AiStreamer:
     def __init__(self, api_key, args):
         self.api_key = api_key
         self.args = args
+        self.wav2lip_model = None
+        self.content_id = 0  # 当前音视频文件生成后的名称（编号），根据编号进行播放
 
         # 初始化预设video路径
         self.not_talking_videos_source_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
@@ -27,13 +29,10 @@ class AiStreamer:
         self.sync_result_path = os.path.join(os.path.join(self.args.video_source, self.args.streamer),
                                              'sync_result')
 
-        self.wav2lip_model = None
-
         # 建立输入的通信队列
         self.normal_chats = mp.Queue()  # 普通弹幕队列
         self.sc_chats = mp.Queue()  # sc留言队列
-
-        self.content_id = 0  # 当前音视频文件生成后的名称（编号），根据编号进行播放
+        self.questions = mp.Queue()  # 结果队列,格式为(question: result_avi path})
 
     def listen_chats(self):
         """实时监听直播间的普通弹幕和付费SC留言"""
@@ -65,9 +64,7 @@ class AiStreamer:
 
     def get_inputs_from_typing(self, question):
         """替代音频输入，将问题写入jsonl文件中"""
-        uname, msg = question[0], question[1]
-        processed_question = uname + '问：' + msg
-        self.write_jsonl(processed_question)
+        self.write_jsonl(question)
 
     def transcribe_audio(self):
         """对指定音频进行语音识别"""
@@ -109,14 +106,6 @@ class AiStreamer:
                 path = model_dir / file
                 print(path)
         return path
-
-    # def play_generated_audio(self):
-    #     while True:
-    #         if self.audio_ready_signal is True:
-    #             wav_file_path = Path(self.args.audio_output) / Path(self.args.streamer + '.wav')
-    #             audio = AudioSegment.from_file(wav_file_path)
-    #             play(audio)
-    #             self.audio_ready_signal = False
 
     def generate_audio(self, input_text):
         """paddlespeech本地推理"""
@@ -197,11 +186,18 @@ class AiStreamer:
 
     def generate_answer(self, question):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
+        # 修改问题格式
+        uname, msg = question[0], question[1]
+        processed_question = uname + '问：' + msg
+
+        # 生成回答
         self.content_id += 1  # 确认编号
-        self.get_inputs_from_typing(question=question)  # 将问题写入jsonl中的message模板
+        self.get_inputs_from_typing(question=processed_question)  # 将问题写入jsonl中的message模板
         text_answer = self.generate_text()
         self.generate_audio(input_text=text_answer)
-        self.generate_video()
+        # self.generate_video()
+        print({processed_question: os.path.join(self.sync_result_path, str(self.content_id) + '.avi')})
+        self.questions.put((processed_question, os.path.join(self.sync_result_path, str(self.content_id) + '.avi')))  # 队列存入回答
 
     def processing_chats(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
@@ -220,14 +216,14 @@ class AiStreamer:
 
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # 启动 listen_chats 进程
-        listen_chats_process = mp.Process(target=self.listen_chats)
-        listen_chats_process.start()
+        # # 启动 listen_chats 进程
+        # listen_chats_process = mp.Process(target=self.listen_chats)
+        # listen_chats_process.start()
 
-        # # 启动 load_next_video 进程
-        # load_next_video_process = mp.Process(target=self.load_next_video)
-        # load_next_video_process.start()
+        # 启动 load_next_video 进程
+        load_next_video_process = mp.Process(target=self.load_next_video)
+        load_next_video_process.start()
 
-        # 启动 processing_chats 进程
-        processing_chats_process = mp.Process(target=self.processing_chats)
-        processing_chats_process.start()
+        # # 启动 processing_chats 进程
+        # processing_chats_process = mp.Process(target=self.processing_chats)
+        # processing_chats_process.start()
