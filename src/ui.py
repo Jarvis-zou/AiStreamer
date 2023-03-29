@@ -16,17 +16,17 @@ class MainWindow(QMainWindow):
         self.generated_video = None
 
         # 是否要播放生成视频的信号
-        self.answer_signal = False
+        self.play_generated_video = False
 
         # 创建 QVideoWidget
         self.video_widget = QVideoWidget()
-        # self.video_widget.setFixedSize(720, 1200)
-        self.video_widget.setFixedSize(360, 600)
+        self.video_widget.setFixedSize(720, 1200)
+        # self.video_widget.setFixedSize(360, 600)
 
         # 设置窗口标题和大小
         self.setWindowTitle('Streaming')
-        # self.resize(1200, 900)
-        self.resize(600, 450)
+        self.resize(1200, 900)
+        # self.resize(600, 450)
 
         # 创建媒体播放器并将其设置为 QVideoWidget
         self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
@@ -89,12 +89,16 @@ class MainWindow(QMainWindow):
         self.timer.start(1000)
 
     def check_question(self):
-        # question_info = self.streamer.answers.get()
-        # question, result = question_info[0], question_info[1]
-        question, result = 'FOXDIE问：卵盘？几个T', 'C:\\Users\\ZouJiawei\\Desktop\\Advanced_explore\\source\\fengge\\sync_result\\1.avi'
-        self.answer_box.clear()
-        self.answer_box.setPlainText(f'当前问题：{question}')
-        self.generated_video = result
+        # self.generated_video = r'C:\Users\Administrator\Desktop\workspace\source\fengge\sync_result\1.avi'
+        # self.answer_box.setPlainText(f'当前问题：原版穿透还不错，主要打盾兵')
+        if not self.streamer.questions.empty():
+            question_info = self.streamer.questions.get()
+            question, result = question_info[0], question_info[1]
+            self.answer_box.clear()
+            self.answer_box.setPlainText(f'当前问题：{question}')
+            self.generated_video = result
+        else:
+            print(f'当前暂无问题')
 
     def skip_answer(self):
         if self.generated_video is not None:
@@ -106,7 +110,7 @@ class MainWindow(QMainWindow):
             print(f"文件已被删除...")
 
     def play_answer(self):
-        self.answer_signal = True
+        self.play_generated_video = True
         self.media_player.stop()
 
     def update_avi_list(self):
@@ -121,19 +125,16 @@ class MainWindow(QMainWindow):
 
     def handle_state_changed(self, state):
         if state == QMediaPlayer.StoppedState:
-            if self.answer_signal is False or self.generated_video is None:
+            if not self.play_generated_video:
                 new_video_url = QUrl.fromLocalFile(self.streamer.load_next_video())
                 self.media_player.setMedia(QMediaContent(new_video_url))
                 self.media_player.play()
-                if self.generated_video is not None:
-                    self.skip_answer()  # 播放完删除video
-                    self.generated_video = None
             else:
+                print(self.generated_video)
                 new_video_url = QUrl.fromLocalFile(self.generated_video)
                 self.media_player.setMedia(QMediaContent(new_video_url))
                 self.media_player.play()
-                self.answer_signal = False
-
+                self.play_generated_video = False
 
 
 

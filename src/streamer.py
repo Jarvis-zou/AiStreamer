@@ -1,4 +1,7 @@
 import multiprocessing as mp
+import threading
+import queue
+from contextlib import ExitStack
 import openai
 import asyncio
 import jsonlines
@@ -19,6 +22,9 @@ class AiStreamer:
         self.api_key = api_key
         self.args = args
         self.wav2lip_model = None
+        self.frontend = None
+        self.am_predictor = None
+        self.voc_predictor = None
         self.content_id = 0  # 当前音视频文件生成后的名称（编号），根据编号进行播放
 
         # 初始化预设video路径
@@ -33,6 +39,12 @@ class AiStreamer:
         self.normal_chats = mp.Queue()  # 普通弹幕队列
         self.sc_chats = mp.Queue()  # sc留言队列
         self.questions = mp.Queue()  # 结果队列,格式为(question: result_avi path})
+
+        # self.normal_chats = queue.Queue()  # 普通弹幕队列
+        # self.sc_chats = queue.Queue()  # sc留言队列
+        # self.questions = queue.Queue()  # 结果队列,格式为(question: result_avi path})
+        # self.gpt_results = queue.Queue()
+        # self.tts_results = queue.Queue()
 
     def listen_chats(self):
         """实时监听直播间的普通弹幕和付费SC留言"""
@@ -78,22 +90,23 @@ class AiStreamer:
 
     def generate_text(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
-        openai.api_key = self.api_key
-        # 区分3.5模型和其他老模型，因为接口调用方式不一样
-        if self.args.model_name == 'gpt-3.5-turbo':
-            massages = self.read_jsonl()
-            result = openai.ChatCompletion.create(
-                model=self.args.model_name,
-                messages=massages,
-                temperature=0.4,
-                top_p=1,
-                n=1,
-                presence_penalty=0.2,
-                frequency_penalty=0.2
-            )
-            answer = result['choices'][0]['message']['content']
-            print(f'回答：{answer}')
-            return answer
+        # openai.api_key = self.api_key
+        # # 区分3.5模型和其他老模型，因为接口调用方式不一样
+        # if self.args.model_name == 'gpt-3.5-turbo':
+        #     massages = self.read_jsonl()
+        #     result = openai.ChatCompletion.create(
+        #         model=self.args.model_name,
+        #         messages=massages,
+        #         temperature=0.4,
+        #         top_p=1,
+        #         n=1,
+        #         presence_penalty=0.2,
+        #         frequency_penalty=0.2
+        #     )
+        #     answer = result['choices'][0]['message']['content']
+        #     print(f'回答：{answer}')
+        answer = "对啊，好像我还能没看到上面中国主播啊或者网红啊去过对马岛，我可能也算是第一个去对马岛的了吧，到时候深度解密一下对马岛到底什么样儿啊，也没去过对马岛第一次去挺紧张的"
+        return answer
 
     @ staticmethod
     def find_model(model_dir):
@@ -109,48 +122,20 @@ class AiStreamer:
 
     def generate_audio(self, input_text):
         """paddlespeech本地推理"""
-        am_inference_dir = self.args.encoder
-        voc_inference_dir = self.args.vocoder
-        wav_output_dir = self.args.audio_output
-        device = self.args.device
-
-        # frontend
-        frontend = get_frontend(
-            lang="mix",
-            phones_dict=os.path.join(am_inference_dir, "phone_id_map.txt"),
-            tones_dict=None
-        )
-
-        # am_predictor
-        am_predictor = get_predictor(
-            model_dir=am_inference_dir,
-            model_file="fastspeech2_mix" + ".pdmodel",
-            params_file="fastspeech2_mix" + ".pdiparams",
-            device=device)
-
-        # voc_predictor
-        voc_predictor = get_predictor(
-            model_dir=voc_inference_dir,
-            model_file="pwgan_aishell3" + ".pdmodel",
-            params_file="pwgan_aishell3" + ".pdiparams",
-            device=device)
-
-        output_dir = Path(wav_output_dir)
+        output_dir = Path(self.args.audio_output)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         merge_sentences = True
         fs = 24000
-        am_output_data = get_am_output(
-            input=input_text,
-            am_predictor=am_predictor,
-            am="fastspeech2_mix",
-            frontend=frontend,
-            lang="mix",
-            merge_sentences=merge_sentences,
-            speaker_dict=os.path.join(am_inference_dir, "phone_id_map.txt"),
-            spk_id=0, )
-        wav = get_voc_output(
-            voc_predictor=voc_predictor, input=am_output_data)
+        am_output_data = get_am_output(input=input_text,
+                                       am_predictor=self.am_predictor,
+                                       am="fastspeech2_mix",
+                                       frontend=self.frontend,
+                                       lang="mix",
+                                       merge_sentences=merge_sentences,
+                                       speaker_dict=os.path.join(self.args.encoder, "phone_id_map.txt"),
+                                       spk_id=0)
+        wav = get_voc_output(voc_predictor=self.voc_predictor, input=am_output_data)
 
         # 保存文件
         wav_id = str(self.content_id) + ".wav"
@@ -195,15 +180,35 @@ class AiStreamer:
         self.get_inputs_from_typing(question=processed_question)  # 将问题写入jsonl中的message模板
         text_answer = self.generate_text()
         self.generate_audio(input_text=text_answer)
-        # self.generate_video()
-        print({processed_question: os.path.join(self.sync_result_path, str(self.content_id) + '.avi')})
+        self.generate_video()
         self.questions.put((processed_question, os.path.join(self.sync_result_path, str(self.content_id) + '.avi')))  # 队列存入回答
 
     def processing_chats(self):
         """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
-        if not self.wav2lip_model:
-            # 预加载lip_sync model
+        # 预加载lip_sync model
+        if self.wav2lip_model is None:
             self.wav2lip_model = load_model(self.args.wav2lip_model)
+
+        # 预加载TTS模型
+        if self.frontend is None:
+            self.frontend = get_frontend(
+                lang="mix",
+                phones_dict=os.path.join(self.args.encoder, "phone_id_map.txt"),
+                tones_dict=None)
+        if self.am_predictor is None:
+            self.am_predictor = get_predictor(
+                model_dir=self.args.encoder,
+                model_file="fastspeech2_mix" + ".pdmodel",
+                params_file="fastspeech2_mix" + ".pdiparams",
+                device=self.args.device)
+        if self.voc_predictor is None:
+            self.voc_predictor = get_predictor(
+                model_dir=self.args.vocoder,
+                model_file="pwgan_aishell3" + ".pdmodel",
+                params_file="pwgan_aishell3" + ".pdiparams",
+                device=self.args.device)
+
+        # 主循环
         while True:
             if not self.sc_chats.empty():  # 优先读取sc弹幕的留言
                 sc_question = self.sc_chats.get()
@@ -216,14 +221,11 @@ class AiStreamer:
 
     def start_stream(self):
         """使用进程启动各个模块对消息列表进行监听"""
-        # # 启动 listen_chats 进程
-        # listen_chats_process = mp.Process(target=self.listen_chats)
-        # listen_chats_process.start()
+        # 启动 listen_chats 进程
+        listen_chats_process = mp.Process(target=self.listen_chats)
+        listen_chats_process.start()
 
-        # 启动 load_next_video 进程
-        load_next_video_process = mp.Process(target=self.load_next_video)
-        load_next_video_process.start()
+        # 启动 processing_chats 进程
+        processing_chats_process = mp.Process(target=self.processing_chats)
+        processing_chats_process.start()
 
-        # # 启动 processing_chats 进程
-        # processing_chats_process = mp.Process(target=self.processing_chats)
-        # processing_chats_process.start()
