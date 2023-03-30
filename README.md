@@ -1,12 +1,5 @@
 # 如何本地使用
 
-Created by: Jarvis Z
-Created time: March 21, 2023 5:08 PM
-Last edited by: Jarvis Z
-Last edited time: March 21, 2023 6:00 PM
-
-# 如何本地使用
-
 本文将介绍如何在本地使用AiStreamer。
 
 ## 项目内容
@@ -25,52 +18,56 @@ sudo apt-get install ffmpeg
 
 ## 获取权重以及测试用例
 
-在开始使用前，您需要下载TTS和Wav2Lip模块的预训练权重。您可以通过以下链接下载权重：
-
-| Model | Description | Link to the model |
-| --- | --- | --- |
-| Wav2Lip | Highly accurate lip-sync | https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels%2Fwav2lip%2Epth&parent=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels&ga=1 |
-| Wav2Lip + GAN | Slightly inferior lip-sync, but better visual quality | https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels%2Fwav2lip%5Fgan%2Epth&parent=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels&ga=1 |
-| Expert Discriminator | Weights of the expert discriminator | https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels%2Flipsync%5Fexpert%2Epth&parent=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels&ga=1 |
-| Visual Quality Discriminator | Weights of the visual disc trained in a GAN setup | https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels%2Fvisual%5Fquality%5Fdisc%2Epth&parent=%2Fpersonal%2Fradrabha%5Fm%5Fresearch%5Fiiit%5Fac%5Fin%2FDocuments%2FWav2Lip%5FModels&ga=1 |
-| s3fd | pre-trained model | https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth |
-
-将下载的Wav2Lip权重文件放入`path to your weights/`文件夹中，其中`s3fd.pth`应当被下载到`src/Wav2Lip/face_detection/detection/sfd/s3fd.pth`。
-
-或者你也可以在[这里](https://pan.baidu.com/s/1oM0igqeGZ03e9XvFPnZQZA)下载所有的数据，提取码为rqp1，文件中包含了所有的模型和演示视频用例。
+你也可以在[这里](https://drive.google.com/file/d/18brA0qfVQ5fE0MHsGq9thxZW-oWpPfjd/view?usp=share_link)下载所有的数据，文件中包含了所有所需的模型和初次运行所需的用例。
 
 解压后文件目录为：
 
 ```
-├── source/
-│   ├── checkpoints/
-│   │   ├── lipsync_expert.pth
-│   │   ├── visual_quality_disc.pth
-│   │   ├── wav2lip_gan.pth
-│   │   └── wav2lip.pth
+source/
+├── ckpt/
+│   ├── fengge/
+│   │   ├── default.yaml
+│   │   └── ...
+│   └── pwgan_aishell3_static_1.1.0/
+│   │   ├── pwgan_aishell3.pdiparams
+│   │   ├── pwgan_aishell3.pdiparams.info
+│   │   └── pwgan_aishell3.pdmodel
+├── checkpoints/
+│   ├── s3fd.pth
+│   └── wav2lip_gan.pth
+├── fengge/
 │   ├── not_talking_source/
 │   │   ├── not_talking_1.avi
-│   │   ├── not_talking_2.avi
-│   │   ├── not_talking_3.avi
+│   │   └── ...
+│   ├── sync_result/
 │   │   └── ...
 │   ├── talking_source/
 │   │   ├── talking_1.avi
-│   │   ├── talking_2.avi
-│   │   ├── talking_3.avi
 │   │   └── ...
-│   ├── sync_result/
-│   ├── ckpt(TTS模型，由于现阶段TTS使用gtts库代替，所以这里的模型用不到)/
 ```
+
+其中需要将`s3fd.pth`放入`src/Wav2Lip/face_detection/detection/sfd`目录下
 
 ## 运行
 
 要运行程序，需要先将openai api key设置为环境变量，然后请执行以下命令：
 
 ```
-python start_stream.py --streamer <ai_name> --video_source <path to source>
+python start_stream.py --room_id <live room id> --encoder <source/ckpt/fengge> --vocoder <source/ckpt/pwgan_aishell3_static_1.1.0> --wav2lip_model <source/checkpoints/wav2lip_gan.pth> --video_source <source/>
 ```
 
 这将启动程序，您将会看到一个QT界面，您可以在其中询问你的问题。
+
+![Untitled](examples/UI.png)
+
+# 如何使用app
+
+在右上角可以看到当前已经生成结束的回答编号，操作步骤为下：
+
+- 点击`看看问题`，将会在右下的文本框内显示当前文件列表置顶回答所对应的原弹幕提问。
+- 如果已经点击`看看问题`且该问题你觉得不合适则可以点击`跳过问题` ，该操作将删除当前文件列表第一个文件(也就是当前的问题)，此时再点击`看看问题`将查看下一个问题。
+- 点击`播放`，将播放当前置顶的回答，注意：播放前必须点击看看问题，否则视频将不会载入。
+- 播放完毕点击跳过问题，将删除当前已经播放完毕的回答，此时置顶为下一条回答。
 
 ## 反馈
 
