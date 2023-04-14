@@ -1,40 +1,32 @@
-import websocket
-import threading
-import json
-import time
+import whisper
+import os
 
-room_id = "21704811"  # 这里填写你要爬取的直播间ID
+# 加载语音识别模型
+model = whisper.load_model("medium")
 
-# 弹幕WebSocket地址
-url = f"wss://broadcastlv.chat.bilibili.com/sub"
+# 音频文件夹和srt文件夹路径
+audio_dir = r'C:\Users\ZouJiawei\Desktop\Advanced_explore\train_tts\wavs\fengge_video_2'
+save_dir = r'C:\Users\ZouJiawei\Desktop\Advanced_explore\train_tts\labels'
 
-# 发送心跳包，保持WebSocket连接
-def send_heartbeat(ws):
-    while True:
-        ws.send(b'\x00\x02{"type":2}\x00\x00')
-        time.sleep(30)
+# 遍历音频文件夹中的所有音频文件
+for file_name in os.listdir(audio_dir):
+    absolute_path = os.path.join(audio_dir, file_name)
+    print(file_name)
 
-# 处理弹幕消息
-def handle_danmu(data):
-    # 将消息转换为JSON格式
-    try:
-        msg = json.loads(data)
-    except:
-        return
-    # 解析JSON格式消息，获取弹幕内容
-    if msg["cmd"] == "DANMU_MSG":
-        danmu = msg["info"][1]
-        print(f"【{msg['info'][0][3]}】{danmu}")
+    # 生成srt文件路径
+    label_file_path = os.path.join(save_dir, 'list.txt')
 
-# 建立WebSocket连接，并监听弹幕消息
-def connect_websocket():
-    ws = websocket.WebSocketApp(url,
-                                on_message=handle_danmu,
-                                on_close=lambda ws: print("WebSocket已关闭"),
-                                on_error=lambda error: print(f"WebSocket发生错误：{error}"))
-    ws.on_open = lambda ws: threading.Thread(target=send_heartbeat, args=(ws,), daemon=True).start()
-    ws.run_forever()
+    # 读取音频文件并识别出文本内容
+    audio = whisper.load_audio(absolute_path)
+    audio = whisper.pad_or_trim(audio)
+    mel = whisper.log_mel_spectrogram(audio).to(model.device)
+    _, probs = model.detect_language(mel)
+    print(f"Detected language: {max(probs, key=probs.get)}")
+    options = whisper.DecodingOptions(fp16=False)
+    result = whisper.decode(model, mel, options)
+    print(result.text)
 
-# 启动弹幕爬取
-if __name__ == '__main__':
-    connect_websocket()
+    # 将识别结果写入srt文件中
+    with open(label_file_path, 'a+', encoding='utf8') as label_file:
+        content = 'wavs/' + file_name + '|' + result.text + '\n'
+        label_file.write(content)

@@ -40,12 +40,6 @@ class AiStreamer:
         self.sc_chats = mp.Queue()  # sc留言队列
         self.questions = mp.Queue()  # 结果队列,格式为(question: result_avi path})
 
-        # self.normal_chats = queue.Queue()  # 普通弹幕队列
-        # self.sc_chats = queue.Queue()  # sc留言队列
-        # self.questions = queue.Queue()  # 结果队列,格式为(question: result_avi path})
-        # self.gpt_results = queue.Queue()
-        # self.tts_results = queue.Queue()
-
     def listen_chats(self):
         """实时监听直播间的普通弹幕和付费SC留言"""
         asyncio.run(listen(self.args.room_id, self.normal_chats, self.sc_chats))
@@ -184,7 +178,7 @@ class AiStreamer:
         self.questions.put((processed_question, os.path.join(self.sync_result_path, str(self.content_id) + '.avi')))  # 队列存入回答
 
     def processing_chats(self):
-        """从Inputs路径下的对应jsonl文件中读取用户的提问, 根据不同模型调用不同API并返回答案"""
+        """预加载模型并监听输入队列"""
         # 预加载lip_sync model
         if self.wav2lip_model is None:
             self.wav2lip_model = load_model(self.args.wav2lip_model)
