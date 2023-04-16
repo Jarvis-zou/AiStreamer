@@ -1,32 +1,20 @@
-import whisper
 import os
+import subprocess
 
-# 加载语音识别模型
-model = whisper.load_model("medium")
 
-# 音频文件夹和srt文件夹路径
-audio_dir = r'C:\Users\ZouJiawei\Desktop\Advanced_explore\train_tts\wavs\fengge_video_2'
-save_dir = r'C:\Users\ZouJiawei\Desktop\Advanced_explore\train_tts\labels'
+def cut_audio(dir_path, save_path, sample_rate, seg_len):
+    """对原始wav数据重采样到指定采样率和单声道16bit，并且将其重新切段并保存"""
+    for file_name in os.listdir(dir_path):
+        file_path = os.path.join(dir_path, file_name)
+        save_name = save_path + '/' + file_name.split('.')[0]
+        subprocess.run(f"ffmpeg -hide_banner -loglevel panic -i {file_path} -ac 1 -ar {sample_rate} -f s16le - " +
+                       f"| ffmpeg -hide_banner -loglevel panic -f s16le -ar {sample_rate} -i - -f segment -segment_time {seg_len} {save_name}_%03d.wav",
+                       shell=True, check=True)
 
-# 遍历音频文件夹中的所有音频文件
-for file_name in os.listdir(audio_dir):
-    absolute_path = os.path.join(audio_dir, file_name)
-    print(file_name)
 
-    # 生成srt文件路径
-    label_file_path = os.path.join(save_dir, 'list.txt')
+raw_wav_dir = r'D:\workspace\audio_train\raw'
+processed_wav_save_dir = r'D:\workspace\audio_train\wavs'
+sample_rate = 22050  # 采样率设置
+seg_len = 300  # 切段长度，单位为秒，默认300秒(5分钟切段)
 
-    # 读取音频文件并识别出文本内容
-    audio = whisper.load_audio(absolute_path)
-    audio = whisper.pad_or_trim(audio)
-    mel = whisper.log_mel_spectrogram(audio).to(model.device)
-    _, probs = model.detect_language(mel)
-    print(f"Detected language: {max(probs, key=probs.get)}")
-    options = whisper.DecodingOptions(fp16=False)
-    result = whisper.decode(model, mel, options)
-    print(result.text)
-
-    # 将识别结果写入srt文件中
-    with open(label_file_path, 'a+', encoding='utf8') as label_file:
-        content = 'wavs/' + file_name + '|' + result.text + '\n'
-        label_file.write(content)
+cut_audio(raw_wav_dir, processed_wav_save_dir, sample_rate, seg_len)  # 先对原始数据进行切分
