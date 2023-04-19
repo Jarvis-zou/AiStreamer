@@ -111,7 +111,7 @@ def slice_wav(data_root, vad_output_dir, wav_dir, duration_range, save_dir):
     print(f'切片完成，总计{len(meta)}条数据，总计{total_audio_hour}小时数据')
 
 
-def asr_punc_detection(wav_dir, save_dir):
+def asr_detection(wav_dir, save_dir):
     """
     对切分好的固定长度的音频段使用VAD模型进行识别
     
@@ -123,8 +123,6 @@ def asr_punc_detection(wav_dir, save_dir):
     inference_pipeline = pipeline(
         task=Tasks.auto_speech_recognition,
         model='damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
-        # vad_model='damo/speech_fsmn_vad_zh-cn-16k-common-pytorch',
-        # punc_model='damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
         device=DEVICE,
         output_dir=save_dir)
     
@@ -140,7 +138,38 @@ def asr_punc_detection(wav_dir, save_dir):
     # # 调用ASR识别语音，PUNC识别标点
     print(f'开始进行ASR语音识别.')
     inference_pipeline(audio_in=scp_file_path)  
-    print(f'ASR PUNC结果生成完毕.')
+    print(f'ASR结果生成完毕.')
+
+
+def punc_detection(save_dir):
+    """
+    对切分好的固定长度的音频段使用VAD模型进行识别
+    
+    输入: 
+        wav_dir: 上一步中切分好的段音频wav slices文件保存的路径
+        save_dir: asr检测结果的保存路径，保存形式可参照modelscope文档 https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/summary
+    """
+    # 定义pipeline，因为用scp文件形式进行处理所以添加了output_dir选项
+    inference_pipeline = pipeline(
+        task=Tasks.punctuation,
+        model='damo/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
+        model_revision="v1.1.7",
+        device=DEVICE,
+        output_dir=save_dir)
+    
+    # # 讲上一步切分好的wav片段写入scp文件中
+    # scp_file_path= os.path.join(save_dir, 'wavs.scp')
+    # with open(scp_file_path, 'w+', encoding='utf8') as scp:
+    #     for file_name in os.listdir(wav_dir):
+    #         file_path = os.path.join(wav_dir, file_name)
+    #         line = file_name + '  ' + file_path + '\n'
+    #         scp.write(line)
+    # print(f'scp文件生成完毕.')
+
+    # # 调用ASR识别语音，PUNC识别标点
+    print(f'开始进行PUNC标点符号识别.')
+    result = inference_pipeline(text_in='我们都是木头人不会讲话不会动')  
+    print(f'PUNC结果生成完毕.{result}')
 
 
 # 路径初始化, 首先在data_root路径下将这些路径创建好
@@ -150,6 +179,7 @@ wav_cuts_save_dir = os.path.join(data_root, 'wavs')  # 5分钟切段wav存放路
 vad_save_dir = os.path.join(data_root, 'vad')  # vad语音起止点检测结果存放路径
 slices_save_dir = os.path.join(data_root, 'wav_slices')  # 根据vad结果切分的wav切片存放路径
 asr_save_dir = os.path.join(data_root, 'asr')  # asr识别结果的保存路径
+punc_save_dir = os.path.join(data_root, 'punc')  # 标点符号识别结果的保存路径
 
 # 预处理相关参初始化
 DEVICE = 'cpu'
@@ -160,5 +190,6 @@ slice_duration = [2.0, 15.0]  # 音频切片的长度区间，切分后保证所
 # cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分
 # vad_preprocess(wav_cuts_save_dir, vad_save_dir)  # vad模型将每句话单独切分成音频
 # slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_save_dir)  # 按照VAD结果将5分钟的音频片段切分成2-15秒的切片
-asr_punc_detection(slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
+# asr_detection(slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
+punc_detection(punc_save_dir)  # 调用PUNC模型进行标点符号识别
 
