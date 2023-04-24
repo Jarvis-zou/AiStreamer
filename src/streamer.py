@@ -9,12 +9,11 @@ import random
 import soundfile as sf
 import os
 from pathlib import Path
+from transformers import AutoTokenizer, AutoModelForMaskedLM
 from src.listen_chats import listen
-from paddlespeech.t2s.exps.syn_utils import get_am_output
-from paddlespeech.t2s.exps.syn_utils import get_frontend
-from paddlespeech.t2s.exps.syn_utils import get_predictor
-from paddlespeech.t2s.exps.syn_utils import get_voc_output
 from src.Wav2Lip.inference import sync_lip, load_model
+from src.NeMo.nemo.collections.tts.models import HifiGanModel, FastPitchModel
+
 
 
 class AiStreamer:
@@ -184,23 +183,9 @@ class AiStreamer:
             self.wav2lip_model = load_model(self.args.wav2lip_model)
 
         # 预加载TTS模型
-        if self.frontend is None:
-            self.frontend = get_frontend(
-                lang="mix",
-                phones_dict=os.path.join(self.args.encoder, "phone_id_map.txt"),
-                tones_dict=None)
-        if self.am_predictor is None:
-            self.am_predictor = get_predictor(
-                model_dir=self.args.encoder,
-                model_file="fastspeech2_mix" + ".pdmodel",
-                params_file="fastspeech2_mix" + ".pdiparams",
-                device=self.args.device)
-        if self.voc_predictor is None:
-            self.voc_predictor = get_predictor(
-                model_dir=self.args.vocoder,
-                model_file="pwgan_aishell3" + ".pdmodel",
-                params_file="pwgan_aishell3" + ".pdiparams",
-                device=self.args.device)
+        tokenizer = AutoTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext-large")
+        bert_model = AutoModelForMaskedLM.from_pretrained("hfl/chinese-roberta-wwm-ext-large").to(self.args.device).eval()
+        vocoder_model_pt = HifiGanModel.load_from_checkpoint(checkpoint_path=self.args.hifigan).to(self.args.device).eval()
 
         # 主循环
         while True:

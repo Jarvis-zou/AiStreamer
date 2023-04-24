@@ -111,7 +111,7 @@ def slice_wav(data_root, vad_output_dir, wav_dir, duration_range, save_dir):
     print(f'切片完成，总计{len(meta)}条数据，总计{total_audio_hour}小时数据')
 
 
-def asr_detection(wav_dir, save_dir):
+def asr_detection(data_root, wav_dir, save_dir):
     """
     对切分好的固定长度的音频段使用VAD模型进行识别
     
@@ -119,26 +119,45 @@ def asr_detection(wav_dir, save_dir):
         wav_dir: 上一步中切分好的段音频wav slices文件保存的路径
         save_dir: asr检测结果的保存路径，保存形式可参照modelscope文档 https://modelscope.cn/models/damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/summary
     """
-    # 定义pipeline，因为用scp文件形式进行处理所以添加了output_dir选项
-    inference_pipeline = pipeline(
-        task=Tasks.auto_speech_recognition,
-        model='damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
-        device=DEVICE,
-        output_dir=save_dir)
+    # # 定义pipeline，因为用scp文件形式进行处理所以添加了output_dir选项
+    # inference_pipeline = pipeline(
+    #     task=Tasks.auto_speech_recognition,
+    #     model='damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
+    #     device=DEVICE,
+    #     output_dir=save_dir)
     
-    # 讲上一步切分好的wav片段写入scp文件中
-    scp_file_path= os.path.join(save_dir, 'wavs.scp')
-    with open(scp_file_path, 'w+', encoding='utf8') as scp:
-        for file_name in os.listdir(wav_dir):
-            file_path = os.path.join(wav_dir, file_name)
-            line = file_name + '  ' + file_path + '\n'
-            scp.write(line)
-    print(f'scp文件生成完毕.')
+    # # 将上一步切分好的wav片段写入scp文件中
+    # scp_file_path= os.path.join(save_dir, 'wavs.scp')
+    # with open(scp_file_path, 'w+', encoding='utf8') as scp:
+    #     for file_name in os.listdir(wav_dir):
+    #         file_path = os.path.join(wav_dir, file_name)
+    #         line = file_name + '  ' + file_path + '\n'
+    #         scp.write(line)
+    # print(f'scp文件生成完毕.')
 
-    # # 调用ASR识别语音，PUNC识别标点
-    print(f'开始进行ASR语音识别.')
-    inference_pipeline(audio_in=scp_file_path)  
-    print(f'ASR结果生成完毕.')
+    # # 调用ASR识别语音
+    # print(f'开始进行ASR语音识别.')
+    # inference_pipeline(audio_in=scp_file_path)  
+    # print(f'ASR结果生成完毕.')
+
+    # 将ASR结果写入meta.csv内
+    meta_file = os.path.join(data_root, 'meta.csv')
+    asr_results = os.path.join(save_dir, '1best_recog/text')
+    with open(meta_file) as meta:  # 先载入meta内容
+        meta = [json.loads(i) for i in meta.readlines()]
+        meta = pd.DataFrame(meta).set_index('audio_filepath')
+        meta['text'] = None
+    with open(asr_results, 'r') as f:  # 读取asr结果
+        asr_info = {}
+        for result in f.readlines():
+            wav_path = os.path.join(wav_dir, result.split(' ')[0])
+            text = ' '.join(result.strip().split()[1:])  # 将ASR的文字结果单独提取出来
+            asr_info[wav_path] = text
+    meta = pd.DataFrame({'text': asr_info}).rename_axis('audio_filepath')
+    data_dir = meta[meta['text'].isnull()].index.tolist()
+    meta.drop(data_dir, inplace=True)
+    meta.to_csv(meta_file, index=False)
+    print(meta_file)
 
 
 def punc_detection(save_dir):
@@ -190,6 +209,6 @@ slice_duration = [2.0, 15.0]  # 音频切片的长度区间，切分后保证所
 # cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分
 # vad_preprocess(wav_cuts_save_dir, vad_save_dir)  # vad模型将每句话单独切分成音频
 # slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_save_dir)  # 按照VAD结果将5分钟的音频片段切分成2-15秒的切片
-# asr_detection(slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
-punc_detection(punc_save_dir)  # 调用PUNC模型进行标点符号识别
+asr_detection(data_root, slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
+# punc_detection(punc_save_dir)  # 调用PUNC模型进行标点符号识别
 

@@ -14,9 +14,9 @@ parser.add_argument("--device", type=str, default="cpu")
 parser.add_argument("--room_id", type=int, default=5050)
 parser.add_argument("--streamer", type=str, default='fengge',
                     help="Streamer name, should be same with instructions file name")
-parser.add_argument("--encoder", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\source\ckpt\fengge", help="Dir where encoder models stores")
-parser.add_argument("--vocoder", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\source\ckpt\pwgan_aishell3_static_1.1.0", help="Dir where vocoder models stores")
-parser.add_argument("--wav2lip_model", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\source\checkpoints\wav2lip_gan.pth", help="Dir where wav2lip models stores")
+parser.add_argument("--hifigan", type=str, default=r"/home/zoujiawei/streamer_source/tts_ckpt/hifigan--val_loss=0.3882-epoch=85-last.ckpt", help="Dir where hifigan model stores")
+parser.add_argument("--fs2", type=str, default=r"/home/zoujiawei/streamer_source/tts_ckpt/fs2--val_loss=1.5430-epoch=702-last.ckpt", help="Dir where fastpitch2 model stores")
+parser.add_argument("--wav2lip_model", type=str, default=r"C:\Users\ZouJiawei\Desktop\Advanced_explore\source\checkpoints\wav2lip_gan.pth", help="Dir where wav2lip model stores")
 parser.add_argument("--text_input", type=str, default=r".\GPT_Inputs", help="Dir path where streamer.jsonl stores")
 parser.add_argument("--audio_input", type=str, default=r".\Audio_Inputs",
                     help="Dir path where streamer/streamer.mp3 stores")
@@ -29,7 +29,8 @@ args = parser.parse_args()
 
 if __name__ == '__main__':
     streamer = AiStreamer(openai_key, args)  # 创建streamer对象
-    app = QApplication(sys.argv)
-    main_window = MainWindow(streamer=streamer)  # 启动主窗口，同时预载各种参数
-    main_window.show()
-    sys.exit(app.exec_())
+    streamer.processing_chats()
+    # app = QApplication(sys.argv)
+    # main_window = MainWindow(streamer=streamer)  # 启动主窗口，同时预载各种参数
+    # main_window.show()
+    # sys.exit(app.exec_())
