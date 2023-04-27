@@ -1,11 +1,14 @@
 import os
 import json
 import subprocess
+import torch
 import numpy as np
 import soundfile as sf
 import pandas as pd
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
+from pypinyin import lazy_pinyin, Style
+from transformers import AutoTokenizer, AutoModelForMaskedLM
 
 
 def cut_audio(raw_path, save_path, sample_rate, seg_len):
@@ -154,12 +157,31 @@ def asr_detection(data_root, wav_dir, save_dir):
             text = ' '.join(result.strip().split()[1:])  # 将ASR的文字结果单独提取出来
             meta.loc[wav_path, 'text'] = text
     meta.to_csv(meta_file, index=True)
-    print(f'asr结果保存至{meta_file}')
+    print(f'asr结果保存至:{meta_file}')
 
 
-def punc_detection(data_root, save_dir):
+def get_pinyin(text):
+    """将PUNC检测结果转换成拼音的音素标注形式"""
+    text = text.lower()
+    initials = lazy_pinyin(text, neutral_tone_with_five=False, style=Style.INITIALS, strict=False)
+    finals = lazy_pinyin(text, neutral_tone_with_five=False, style=Style.FINALS_TONE3)
+    text_phone = []
+    for pair in zip(initials, finals):
+        if pair[0] != pair[1] and pair[0] != '':
+            pair = ['@'+i for i in pair]  # 固定格式
+            text_phone.extend(pair)
+        elif pair[0] != pair[1] and pair[0] == '':
+            text_phone.append('@'+pair[1])
+        else:
+            text_phone.extend(list(pair[0]))
+
+    text_phone = " ".join(text_phone)
+    return text_phone
+
+
+def punc_pinyin_detection(data_root, wav_dir, save_dir):
     """
-    对切分好的固定长度的音频段使用VAD模型进行识别
+    对ASR得到的文本结果使用PUNC模型进行标点符号的预测
     
     输入: 
         data_root: 数据根目录，用来获取meta.csv的路径
@@ -185,10 +207,121 @@ def punc_detection(data_root, save_dir):
             scp_format_data = punc_idx + '\t' + text + '\n'  #  格式为key + "\t" + value
             scp.write(scp_format_data)
 
-    # # # 调用ASR识别语音，PUNC识别标点
+    # 调用ASR识别语音，PUNC识别标点
     print(f'开始进行PUNC标点符号识别.')
     inference_pipeline(text_in=scp_file_path)  
     print(f'PUNC结果生成完毕')
+
+    # 将PUNC结果写入meta.csv
+    meta = pd.read_csv(meta_file).set_index('audio_filepath')
+    meta['text_with_punc'] = None  # 保存punc结果
+    meta['pinyin'] = None  # 保存音素结果
+    punc_results = os.path.join(save_dir, 'infer.out')
+    with open(punc_results, 'r') as f:
+        for result in f.readlines():
+            wav_path = os.path.join(wav_dir, result.split('\t')[0] + '.wav')
+            text_with_punc = ' '.join(result.strip().split()[1:])  # 将punc的文字结果单独提取出来
+            text_with_punc = text_with_punc.replace(' ', '')  # 筛出空格
+            pinyin = get_pinyin(text_with_punc)  # 获取音素标注
+            meta.loc[wav_path, 'text_with_punc'] = text_with_punc
+            meta.loc[wav_path, 'pinyin'] = pinyin
+    meta.to_csv(meta_file, index=True)
+    print(f'punc和pinyin结果保存至:{meta_file}')
+
+
+def get_bert_feature(data_root, save_dir):
+    """使用bert获取特征"""
+    # 读取模型
+    tokenizer = AutoTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext-large")
+    model = AutoModelForMaskedLM.from_pretrained("hfl/chinese-roberta-wwm-ext-large")
+    model.to(DEVICE)
+
+    # 获取特征
+    meta_file = os.path.join(data_root, 'meta.csv')
+    meta = pd.read_csv(meta_file)
+    print(f'开始提取bert特征...')
+    for data in meta.iloc:
+        npy_name = data['audio_filepath'].split('/')[-1].replace('.wav', '.npy')  # feature文件的保存路径
+        npy_save_path = os.path.join(save_dir, npy_name)
+        text = data['text_with_punc']
+
+        with torch.no_grad():
+            inputs = tokenizer(text, return_tensors='pt')
+            for i in inputs:
+                inputs[i] = inputs[i].to(DEVICE)
+            res = model(**inputs, output_hidden_states=True)
+            res = torch.cat(res['hidden_states'][-3:-2], -1)[0].cpu().numpy() # 有sos和eos token
+        
+        initials = lazy_pinyin(text, neutral_tone_with_five=False, style=Style.INITIALS, strict=False)
+        finals = lazy_pinyin(text, neutral_tone_with_five=False, style=Style.FINALS_TONE3)
+        
+        _vecs = []
+        _text = []
+        _chars = []
+        for pair in zip(zip(initials, finals), text, res[1:-1]):
+            pair, _c, _vec = pair
+            if pair[0] != pair[1] and pair[0] != '':
+                _text.extend(['@'+i for i in pair])
+                _chars.extend([_c]*2)
+                _vecs.extend([_vec]*2)
+            elif pair[0] != pair[1] and pair[0] == '':
+                _text.append('@'+pair[1])
+                _chars.append(_c)
+                _vecs.append(_vec)
+            else:
+                _text.extend(list(pair[0]))  
+                _chars.extend([_c]*len(pair[0]))
+                _vecs.extend([_vec]*len(pair[0]))
+        try:
+            assert len(_text) == len(_chars)
+            assert len(_vecs) == len(_text)
+        except:
+            print(npy_save_path)
+            continue
+            
+        _vecs = np.stack([res[0]] + _vecs + [res[-1]])
+        np.save(npy_save_path, _vecs)
+    
+    print(f'Bert Features转换完毕.')
+    
+
+def meta2nemo(meta, save_path):
+    """将meta.csv的格式转换成nemo训练FastPitch2需要的json格式"""
+    with open(save_path, 'w+') as f:
+        for data in meta:
+            json_data = {}
+            json_data['audio_filepath'] = data[0]
+            json_data['duration'] = data[1]
+            json_data['text'] = data[3]
+            json_data['normalized_text'] = data[4]
+            f.writelines(json.dumps(json_data, ensure_ascii=False) + '\n')
+
+def create_nemo_datasets(data_root, val_ratio):
+    """筛选一下meta.csv中的数据，打乱并按照比例划分train集和val集"""
+    meta_file = os.path.join(data_root, 'meta.csv')
+    nemo_train_json = os.path.join(data_root, 'train_manifest.json')
+    nemo_val_json = os.path.join(data_root, 'val_manifest.json')
+    meta = pd.read_csv(meta_file)
+    train_ratio = 1 - val_ratio
+
+    # 按照但总时间筛选一下数据
+    portion = (meta['pinyin'].apply(lambda x:len(x.split())) / meta['duration'])
+    meta_processed = meta[(portion >= portion.quantile(0.05)) &(portion <= portion.quantile(0.95))]
+    meta_processed = meta_processed[(3 < meta_processed['duration']) & (meta_processed['duration'] < 15)]
+    meta_processed = meta_processed.values
+    np.random.shuffle(meta_processed)  # 打乱一下顺序
+    meta_train = meta_processed[:int(len(meta_processed) * train_ratio)]
+    meta_val = meta_processed[-int(len(meta_processed) * val_ratio):]
+    print(f'筛选后总计{len(meta_processed)}条数据.')
+
+    # 将csv格式转换成nemo训练需要的json格式
+    meta2nemo(meta_train, nemo_train_json)
+    # meta2nemo(meta_val, nemo_val_json)
+    print(f'nemo数据集生成完毕.')
+
+
+
+
 
 
 # 路径初始化, 首先在data_root路径下将这些路径创建好
@@ -199,16 +332,23 @@ vad_save_dir = os.path.join(data_root, 'vad')  # vad语音起止点检测结果�
 slices_save_dir = os.path.join(data_root, 'wav_slices')  # 根据vad结果切分的wav切片存放路径
 asr_save_dir = os.path.join(data_root, 'asr')  # asr识别结果的保存路径
 punc_save_dir = os.path.join(data_root, 'punc')  # 标点符号识别结果的保存路径
+bert_save_dir = os.path.join(data_root, 'bert_feats')  # bert特征提取完后npy文件保存路径
 
 # 预处理相关参初始化
 DEVICE = 'cpu'
-sample_rate = 16000  # 采样率设置，由于调用ASR模型进行语音识别时会采样到16000，所以切分数据时先采样至16000
+
+sample_rate = 22050  # 采样率设置，因为FS2训练需要22050HZ采样率，因此不能改变
 seg_len = 300  # 切段长度，单位为秒，默认300秒(5分钟切段)，可修改
 slice_duration = [2.0, 15.0]  # 音频切片的长度区间，切分后保证所有音频长度都在该区间内
+val_ratio = 0.1  # 验证集占据总数据的比例
 
-# cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分
+# cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分，modelscope检测时会重采样到16000，如果嫌慢可以先采样成16000hz，但是后面训练必须使用22050hz
 # vad_preprocess(wav_cuts_save_dir, vad_save_dir)  # vad模型将每句话单独切分成音频
 # slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_save_dir)  # 按照VAD结果将5分钟的音频片段切分成2-15秒的切片
 # asr_detection(data_root, slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
-punc_detection(data_root, punc_save_dir)  # 调用PUNC模型进行标点符号识别
+# punc_pinyin_detection(data_root, slices_save_dir, punc_save_dir)  # 调用PUNC模型进行标点符号识别
+# get_bert_feature(data_root, bert_save_dir)  # 提取bert特征
+create_nemo_datasets(data_root, val_ratio)
+
+
 
