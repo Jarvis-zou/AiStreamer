@@ -316,12 +316,8 @@ def create_nemo_datasets(data_root, val_ratio):
 
     # 将csv格式转换成nemo训练需要的json格式
     meta2nemo(meta_train, nemo_train_json)
-    # meta2nemo(meta_val, nemo_val_json)
+    meta2nemo(meta_val, nemo_val_json)
     print(f'nemo数据集生成完毕.')
-
-
-
-
 
 
 # 路径初始化, 首先在data_root路径下将这些路径创建好
@@ -342,12 +338,12 @@ seg_len = 300  # 切段长度，单位为秒，默认300秒(5分钟切段)，可
 slice_duration = [2.0, 15.0]  # 音频切片的长度区间，切分后保证所有音频长度都在该区间内
 val_ratio = 0.1  # 验证集占据总数据的比例
 
-# cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分，modelscope检测时会重采样到16000，如果嫌慢可以先采样成16000hz，但是后面训练必须使用22050hz
-# vad_preprocess(wav_cuts_save_dir, vad_save_dir)  # vad模型将每句话单独切分成音频
-# slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_save_dir)  # 按照VAD结果将5分钟的音频片段切分成2-15秒的切片
-# asr_detection(data_root, slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
-# punc_pinyin_detection(data_root, slices_save_dir, punc_save_dir)  # 调用PUNC模型进行标点符号识别
-# get_bert_feature(data_root, bert_save_dir)  # 提取bert特征
+cut_audio(raw_wav_dir, wav_cuts_save_dir, sample_rate, seg_len)  # 先对原始数据进行第一次切分，modelscope检测时会重采样到16000，如果嫌慢可以先采样成16000hz，但是后面训练必须使用22050hz
+vad_preprocess(wav_cuts_save_dir, vad_save_dir)  # vad模型将每句话单独切分成音频
+slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_save_dir)  # 按照VAD结果将5分钟的音频片段切分成2-15秒的切片
+asr_detection(data_root, slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
+punc_pinyin_detection(data_root, slices_save_dir, punc_save_dir)  # 调用PUNC模型进行标点符号识别
+get_bert_feature(data_root, bert_save_dir)  # 提取bert特征
 create_nemo_datasets(data_root, val_ratio)
 
 
