@@ -344,7 +344,7 @@ slice_wav(data_root, vad_save_dir, wav_cuts_save_dir, slice_duration, slices_sav
 asr_detection(data_root, slices_save_dir, asr_save_dir)  # 调用ASR模型进行语音文本识别
 punc_pinyin_detection(data_root, slices_save_dir, punc_save_dir)  # 调用PUNC模型进行标点符号识别
 get_bert_feature(data_root, bert_save_dir)  # 提取bert特征
-create_nemo_datasets(data_root, val_ratio)
+create_nemo_datasets(data_root, val_ratio)  # 整理成nemo训练的格式
 
 
 

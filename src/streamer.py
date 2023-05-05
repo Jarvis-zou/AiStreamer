@@ -1,7 +1,7 @@
 import multiprocessing as mp
-import threading
-import queue
-from contextlib import ExitStack
+import numpy as np
+import sys
+import torch
 import openai
 import asyncio
 import jsonlines
@@ -9,10 +9,12 @@ import random
 import soundfile as sf
 import os
 from pathlib import Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pypinyin import lazy_pinyin, Style
+from listen_chats import listen
+from Wav2Lip.inference import sync_lip, load_model
+from NeMo.nemo.collections.tts.models import HifiGanModel, FastPitchModel
 from transformers import AutoTokenizer, AutoModelForMaskedLM
-from src.listen_chats import listen
-from src.Wav2Lip.inference import sync_lip, load_model
-from src.NeMo.nemo.collections.tts.models import HifiGanModel, FastPitchModel
 
 
 
@@ -21,6 +23,10 @@ class AiStreamer:
         self.api_key = api_key
         self.args = args
         self.wav2lip_model = None
+        self.tokenizer = None
+        self.bert_model = None
+        self.vocoder_model_pt = None
+        self.spec_gen_model = None
         self.frontend = None
         self.am_predictor = None
         self.voc_predictor = None
@@ -112,27 +118,67 @@ class AiStreamer:
                 path = model_dir / file
                 print(path)
         return path
+    
+    def text_preprocess(self, raw_text):
+        punc_e2c = {',': '，', 
+                    '.': '。', 
+                    '?': '？', 
+                    '、': '，'}
+        raw_text="".join([punc_e2c[i] if i in punc_e2c else i for i in raw_text])  # 按照punc_e2c对应关系转换中英文标点符号
+        text = raw_text.replace(" ","").lower()
+
+        with torch.no_grad():
+            inputs = self.tokenizer("".join(text), return_tensors='pt')
+            for i in inputs:
+                inputs[i] = inputs[i].to(self.args.device)
+            res = self.bert_model(**inputs, output_hidden_states=True)
+            res = torch.cat(res['hidden_states'][-3:-2], -1)[0].cpu().numpy()
+
+        initials = lazy_pinyin(raw_text, neutral_tone_with_five=False, style=Style.INITIALS, strict=False)
+        finals = lazy_pinyin(raw_text, neutral_tone_with_five=False, style=Style.FINALS_TONE3)
+
+        _vecs = []
+        _text = []
+        for _o in zip(zip(initials, finals), list(raw_text), res[1:-1]):
+            _o, _c, _vec = _o
+            if _o[0] != _o[1] and _o[0] != '':
+                _text.extend(['@'+i for i in _o])
+                _vecs.extend([_vec]*2)
+            elif _o[0] != _o[1] and _o[0] == '':
+                _text.append('@'+_o[1])
+                _vecs.append(_vec)
+            else:
+                _text.extend(list(_o[0]))
+                _vecs.extend([_vec]*len(_o[0]))
+
+        _vecs = np.stack([res[0]] + _vecs + [res[-1]])
+        bert = torch.tensor(_vecs.T[None]).to(self.args.device)
+        phoneme = " ".join(_text)
+
+        return bert, phoneme
 
     def generate_audio(self, input_text):
         """paddlespeech本地推理"""
         output_dir = Path(self.args.audio_output)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        merge_sentences = True
-        fs = 24000
-        am_output_data = get_am_output(input=input_text,
-                                       am_predictor=self.am_predictor,
-                                       am="fastspeech2_mix",
-                                       frontend=self.frontend,
-                                       lang="mix",
-                                       merge_sentences=merge_sentences,
-                                       speaker_dict=os.path.join(self.args.encoder, "phone_id_map.txt"),
-                                       spk_id=0)
-        wav = get_voc_output(voc_predictor=self.voc_predictor, input=am_output_data)
+        # 开始推理
+        bert_feats, phoneme = self.text_preprocess(raw_text=input_text)
+        with torch.no_grad():
+            parsed = self.spec_gen_model.parse(str_input=phoneme, normalize=False)
+            res = self.spec_gen_model.generate_spectrogram(
+                tokens=parsed, pace=1,
+                bert_feats=bert_feats,
+            )
+            spectrogram = res
+            audio = self.vocoder_model_pt.convert_spectrogram_to_audio(spec=spectrogram)
+
+        spectrogram = spectrogram.to('cpu').numpy()[0]
+        audio = audio.to('cpu').numpy()
 
         # 保存文件
         wav_id = str(self.content_id) + ".wav"
-        sf.write(output_dir / wav_id, wav, samplerate=fs)
+        sf.write(output_dir / wav_id, audio, samplerate=22050)
         print(f'TTS数据生成完毕...')
 
     def generate_video(self):
@@ -183,9 +229,14 @@ class AiStreamer:
             self.wav2lip_model = load_model(self.args.wav2lip_model)
 
         # 预加载TTS模型
-        tokenizer = AutoTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext-large")
-        bert_model = AutoModelForMaskedLM.from_pretrained("hfl/chinese-roberta-wwm-ext-large").to(self.args.device).eval()
-        vocoder_model_pt = HifiGanModel.load_from_checkpoint(checkpoint_path=self.args.hifigan).to(self.args.device).eval()
+        if self.tokenizer is None:
+            self.tokenizer = AutoTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext-large")
+        if self.bert_model is None:
+            self.bert_model = AutoModelForMaskedLM.from_pretrained("hfl/chinese-roberta-wwm-ext-large").to(self.args.device).eval()
+        if self.vocoder_model_pt is None:
+            self.vocoder_model_pt = HifiGanModel.load_from_checkpoint(checkpoint_path=self.args.hifigan).to(self.args.device).eval()
+        if self.spec_gen_model is None:
+            self.spec_gen_model = FastPitchModel.load_from_checkpoint(checkpoint_path=self.args.fs2).to(self.args.device).eval()
 
         # 主循环
         while True:

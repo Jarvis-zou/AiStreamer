@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import random
-import src.blivedm as blivedm
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import blivedm as blivedm
 
 async def listen(room_id, normal_danmu_queue, pay_danmu_queue):
     await run_single_client(room_id, normal_danmu_queue, pay_danmu_queue)
