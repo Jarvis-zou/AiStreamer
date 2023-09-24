@@ -7,7 +7,7 @@ from src.ui import MainWindow
 from PyQt5.QtWidgets import QApplication
 
 # openai_key = os.environ.get('OPENAI_API_KEY')
-openai_key = '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'
+openai_key = 'your personal key'
 
 # set configuration
 parser = argparse.ArgumentParser()
